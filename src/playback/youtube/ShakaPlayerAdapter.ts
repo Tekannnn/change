@@ -309,7 +309,8 @@ export class ShakaPlayerAdapter implements SabrPlayerAdapter {
       }
 
 
-      const response = await fetch(uri, init);
+      const fetchUri = isGoogleVideoURL(uri) ? `/api/stream?url=${encodeURIComponent(uri)}` : uri;
+      const response = await fetch(fetchUri, init);
       headersReceived(headersToGenericObject(response.headers));
 
       if (requestMetadata && init.method !== 'HEAD' && response.headers.get('content-type') === 'application/vnd.yt-ump') {
@@ -471,12 +472,13 @@ export class ShakaPlayerAdapter implements SabrPlayerAdapter {
   }
 
   public createShakaResponse(args: ShakaResponseArgs): shaka.extern.Response {
+    const responseUrl = isGoogleVideoURL(args.uri) ? args.uri : args.response.url;
     return makeResponse(
       headersToGenericObject(args.response.headers),
       args.arrayBuffer as any || new ArrayBuffer(0),
       args.response.status,
       args.uri,
-      args.response.url,
+      responseUrl,
       args.request,
       args.requestType
     );

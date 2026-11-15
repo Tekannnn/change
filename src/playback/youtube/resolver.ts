@@ -13,7 +13,7 @@ import { botguard } from './botguard';
  * "The page needs to be reloaded" and WEB_EMBEDDED "This video is unavailable",
  * so those two are left out. googlevideo's own SABR example uses VISIONOS.
  */
-export const CLIENT_ORDER = ['VISIONOS', 'YTMUSIC', 'WEB', 'MWEB'] as const;
+export const CLIENT_ORDER = ['VISIONOS', 'IOS', 'ANDROID', 'YTMUSIC', 'WEB', 'MWEB'] as const;
 export type PlayerClientName = (typeof CLIENT_ORDER)[number];
 
 /**
@@ -37,7 +37,7 @@ async function playerRequestToken(yt: Innertube, client: PlayerClientName): Prom
 }
 
 /** StreamResolver: how many clients are worth trying for one track. */
-export const CLIENT_ATTEMPTS = 3;
+export const CLIENT_ATTEMPTS = 4;
 /** InnerTubeXResolver.EXCLUDE_MS: a client that refused a track sits out for this long. */
 const EXCLUDE_MS = 10 * 60_000;
 /** StreamResolver.UNPLAYABLE_TTL_MS: a settled "no" isn't asked again for this long. */
@@ -181,14 +181,16 @@ export async function playerRequest(
 }
 
 /** Why a playability status is a verdict on the track rather than on the client, or null if it isn't. */
-const AGE_GATE = /confirm your age|age-restricted|inappropriate for some users|sign in to confirm/;
+export const AGE_GATE = /confirm your age|age-restricted|inappropriate for some users|sign in to confirm your age/;
+export const BOT_GATE = /not a bot|unusual traffic|automated queries/;
 
-function permanentReason(status: string | undefined, reason: string | undefined, signedIn: boolean): string | null {
+export function permanentReason(status: string | undefined, reason: string | undefined, signedIn: boolean): string | null {
   const text = (reason ?? '').toLowerCase();
+  if (BOT_GATE.test(text)) return null;
   if (AGE_GATE.test(text)) {
     return signedIn
-      ? 'YouTube won’t serve this age-restricted track to this account. Check the account’s age is verified on YouTube.'
-      : 'This track is age-restricted. Sign in to YouTube Music in this browser to play it.';
+      ? 'YouTube won’t serve this age-restricted track to this account.'
+      : 'This track is age-restricted on YouTube.';
   }
   if (/country|region/.test(text)) return 'This track isn’t available in your country';
   if (/private/.test(text)) return 'This track is private';
@@ -239,7 +241,8 @@ export async function resolvePlayer(
       const verdict = permanentReason(status, reason, signed);
       if (verdict) {
         permanent = verdict;
-        ageGated ||= AGE_GATE.test(reason.toLowerCase());
+        const lower = reason.toLowerCase();
+        ageGated ||= !BOT_GATE.test(lower) && AGE_GATE.test(lower);
       }
       excludeClient(videoId, client, `${status}: ${reason} (${ms}ms)`, signed);
     } catch (error) {

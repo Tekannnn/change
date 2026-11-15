@@ -22,6 +22,7 @@ import {
 } from '@/playback/queue/timeline';
 import { trackLog } from '@/playback/trackLog';
 import type { LoadedTrack, StreamStats, YouTubeEngine } from '@/playback/youtube/engine';
+import type { PlaybackTrackHint } from '@/playback/youtube/fallbackStream';
 import type { AutomixGraph, AutoDJSnapshot } from '@/playback/automix';
 
 export interface NowPlaying {
@@ -265,8 +266,12 @@ function ensureAutomix(): Promise<AutomixGraph | null> {
           const back = all[1 - active]!;
           back.gain = 1;
           applyVolumes();
+          const queuedTrack = usePlayer.getState().queue.find((e) => e.track.videoId === videoId)?.track;
           try {
-            const track = await back.engine.load(videoId, { autoplay: false });
+            const track = await back.engine.load(videoId, {
+              autoplay: false,
+              hint: queuedTrack ? trackHintOf(queuedTrack) : undefined,
+            });
             mixLoaded = { videoId, track };
             return true;
           } catch (error) {
@@ -383,6 +388,17 @@ function hintOf(track: Track): NowPlaying {
     durationSec: track.durationSec ?? 0,
     streamInfo: null,
     stream: null,
+  };
+}
+
+function trackHintOf(track: Track): PlaybackTrackHint {
+  return {
+    title: track.title,
+    artist: artistNames(track),
+    album: track.album?.name ?? null,
+    durationSec: track.durationSec,
+    explicit: track.explicit,
+    thumbnail: track.thumbnail,
   };
 }
 
@@ -692,7 +708,11 @@ async function startAt(at: number, { startSec = 0, auto = false, autoplay = true
     all[1 - active]!.engine.stop().catch(() => {});
     deck.gain = 1;
     applyVolumes();
-    const track = await deck.engine.load(entry.track.videoId, { startSec, autoplay });
+    const track = await deck.engine.load(entry.track.videoId, {
+      startSec,
+      autoplay,
+      hint: trackHintOf(entry.track),
+    });
     if (token !== loadToken) return;
     applyTrack(track, entry.track);
     if (!autoplay) usePlayer.setState({ status: 'paused' });
@@ -914,7 +934,7 @@ function maybeCrossfade() {
   trackLog.i(`crossfading into the next track over ${Math.round(remaining)}s`, entry.track.videoId);
 
   back.engine
-    .load(entry.track.videoId, { autoplay: true })
+    .load(entry.track.videoId, { autoplay: true, hint: trackHintOf(entry.track) })
     .then((track) => {
       if (!fade || fade.token !== token || !decks) return;
       fade.pending = false;

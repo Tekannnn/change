@@ -7,6 +7,12 @@ import { botguard } from './botguard';
 import { ytAuthSnapshot } from '@/extension/useYtAuth';
 import { getInnertube, getSignedInnertube } from './innertube';
 import {
+  findPlayableYouTubeCounterpart,
+  resolveJioSaavnStream,
+  type PlaybackTrackHint,
+  type SaavnFallbackStream,
+} from './fallbackStream';
+import {
   CLIENT_ATTEMPTS,
   usesWebPo,
   excludeClient,
@@ -77,18 +83,10 @@ function proxyStreamUrl(rawUrl: string): string {
   return `${base}/api/stream?url=${encodeURIComponent(rawUrl)}`;
 }
 
-function isNativeAudioPreferred(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  const ua = navigator.userAgent;
-  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  const isSafari = /^((?!chrome|chromium|android).)*safari/i.test(ua);
-  return isIOS || isSafari || !shaka.Player.isBrowserSupported();
-}
-
 /**
  * YouTube playback in the browser (prompt §5.2): a player request through
  * YouTube.js, then audio only through Shaka (or native HTMLAudioElement on
- * iPhone/Safari), routed via `/api/stream` so it works everywhere without an
+ * direct streams / iPhone/Safari), routed via `/api/stream` so it works everywhere without an
  * extension.
  */
 export class YouTubeEngine {
@@ -100,6 +98,7 @@ export class YouTubeEngine {
   private loading = false;
   private usingNativeAudio = false;
   private current: { videoId: string; client: PlayerClientName; signed: boolean } | null = null;
+  private currentHint: PlaybackTrackHint | null = null;
   /** The response the playing track streams from, when it has direct URLs; the video picture comes from it too. */
   private direct: ResolvedPlayer | null = null;
   private preferredCodecs: string[];
@@ -155,9 +154,17 @@ export class YouTubeEngine {
    * actually flowing; rejects with [UnplayableError] for a settled "no",
    * [SupersededError] if another load replaced this one.
    */
-  async load(videoId: string, { startSec = 0, autoplay = true } = {}): Promise<LoadedTrack> {
+  async load(
+    videoId: string,
+    {
+      startSec = 0,
+      autoplay = true,
+      hint,
+    }: { startSec?: number; autoplay?: boolean; hint?: PlaybackTrackHint } = {},
+  ): Promise<LoadedTrack> {
     const generation = ++this.generation;
     this.loading = true;
+    this.currentHint = hint ?? null;
     const started = performance.now();
     trackLog.i(`loading at ${startSec.toFixed(1)}s`, videoId);
     try {
@@ -173,13 +180,16 @@ export class YouTubeEngine {
         try {
           resolved = await timed('player request', videoId, () => resolvePlayer(yt, videoId, skip, signed));
         } catch (error) {
-          if (!(error instanceof UnplayableError && error.ageGated) || signed || !ytAuthSnapshot().signedIn) throw error;
-          trackLog.i('age-restricted; asking again signed in', videoId);
-          yt = await timed('signed-in InnerTube session', videoId, getSignedInnertube);
-          signed = true;
-          skip.clear();
-          attempt = -1;
-          continue;
+          if (error instanceof UnplayableError && error.ageGated && !signed && ytAuthSnapshot().signedIn) {
+            trackLog.i('age-restricted; asking again signed in', videoId);
+            yt = await timed('signed-in InnerTube session', videoId, getSignedInnertube);
+            signed = true;
+            skip.clear();
+            attempt = -1;
+            continue;
+          }
+          lastError = error;
+          break;
         }
         this.checkCurrent(generation);
         try {
@@ -196,6 +206,41 @@ export class YouTubeEngine {
           excludeClient(videoId, resolved.client, `streaming failed: ${describe(error)}`, resolved.signed);
         }
       }
+
+      if (hint?.title) {
+        const counterpart = await findPlayableYouTubeCounterpart(yt, videoId, hint);
+        this.checkCurrent(generation);
+        if (counterpart) {
+          try {
+            const track = await this.startStream(counterpart, startSec, autoplay, generation);
+            trackLog.i(
+              `playing counterpart ${counterpart.videoId} via ${track.client}, ${track.format}, first audio after ${Math.round(performance.now() - started)}ms`,
+              videoId,
+            );
+            return { ...track, videoId };
+          } catch (error) {
+            if (error instanceof SupersededError) throw error;
+            lastError = error;
+          }
+        }
+
+        const saavn = await resolveJioSaavnStream(hint);
+        this.checkCurrent(generation);
+        if (saavn) {
+          try {
+            const track = await this.startExternalDirectStream(videoId, saavn, startSec, autoplay, generation);
+            trackLog.i(
+              `playing fallback JioSaavn ${track.format}, first audio after ${Math.round(performance.now() - started)}ms`,
+              videoId,
+            );
+            return track;
+          } catch (error) {
+            if (error instanceof SupersededError) throw error;
+            lastError = error;
+          }
+        }
+      }
+
       throw lastError instanceof Error ? lastError : new Error('No YouTube client could stream this track');
     } catch (error) {
       if (!(error instanceof SupersededError)) {
@@ -217,85 +262,75 @@ export class YouTubeEngine {
     autoplay: boolean,
     generation: number,
   ): Promise<LoadedTrack> {
-    const direct = hasDirectAudio(resolved.info);
-    if (direct && isNativeAudioPreferred()) {
+    if (hasDirectAudio(resolved.info)) {
       return this.startNativeDirectStream(resolved, startSec, autoplay, generation);
     }
 
-    try {
-      const player = await this.ensurePlayer();
-      if (this.usingNativeAudio) {
-        this.audio.pause();
-        this.audio.removeAttribute('src');
-        this.audio.load();
-        await player.attach(this.audio);
-        this.usingNativeAudio = false;
-      }
-
-      const { videoId, client, info, signed } = resolved;
-      await player.unload();
-      this.adapter?.dispose();
-      this.adapter = null;
-      this.current = { videoId, client, signed };
-      this.direct = null;
-
-      const manifest = direct ? await this.directManifest(resolved) : await this.sabrManifest(player, resolved);
-      this.checkCurrent(generation);
-      const mode = direct ? 'direct' : 'SABR';
-
-      await timed(`${client} ${mode} load`, videoId, () =>
-        player.load(`data:application/dash+xml;base64,${btoa(manifest)}`, startSec, 'application/dash+xml'),
-      );
-      this.checkCurrent(generation);
-      const selected = this.selectAudio(player);
-      const format = `${selected.label} ${mode}`;
-      if (direct) this.direct = resolved;
-
-      if (autoplay) {
-        await this.audio.play().catch((error: unknown) => {
-          if (error instanceof DOMException && error.name === 'NotAllowedError') {
-            trackLog.w('autoplay was blocked by the browser; waiting for a tap', videoId);
-          } else throw error;
-        });
-      }
-      await this.firstAudio(generation);
-
-      const basic = info.basic_info;
-      return {
-        videoId,
-        title: basic.title ?? '',
-        author: basic.author ?? '',
-        durationSec: basic.duration ?? Math.round(player.seekRange().end),
-        thumbnails: [...(basic.thumbnail ?? [])]
-          .map((t) => ({ url: t.url, width: t.width, height: t.height }))
-          .sort((a, b) => b.width - a.width),
-        client,
-        format,
-        stream: { ...selected.stats, mode },
-        loudnessDb: info.player_config?.audio_config?.loudness_db ?? null,
-      };
-    } catch (error) {
-      if (error instanceof SupersededError) throw error;
-      if (direct) {
-        trackLog.w(`Shaka direct load failed (${describe(error)}); falling back to native audio`, resolved.videoId);
-        return this.startNativeDirectStream(resolved, startSec, autoplay, generation);
-      }
-      throw error;
+    const player = await this.ensurePlayer();
+    if (this.usingNativeAudio) {
+      this.audio.pause();
+      this.audio.removeAttribute('src');
+      this.audio.load();
+      await player.attach(this.audio);
+      this.usingNativeAudio = false;
     }
+
+    const { videoId, client, info, signed } = resolved;
+    await player.unload();
+    this.adapter?.dispose();
+    this.adapter = null;
+    this.current = { videoId, client, signed };
+    this.direct = null;
+
+    const manifest = await this.sabrManifest(player, resolved);
+    this.checkCurrent(generation);
+    const mode = 'SABR' as const;
+
+    await timed(`${client} ${mode} load`, videoId, () =>
+      player.load(`data:application/dash+xml;base64,${btoa(manifest)}`, startSec, 'application/dash+xml'),
+    );
+    this.checkCurrent(generation);
+    const selected = this.selectAudio(player);
+    const format = `${selected.label} ${mode}`;
+
+    let autoplayBlocked = false;
+    if (autoplay) {
+      await this.audio.play().catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'NotAllowedError') {
+          autoplayBlocked = true;
+          trackLog.w('autoplay was blocked by the browser; waiting for a tap', videoId);
+        } else throw error;
+      });
+    }
+    await this.firstAudio(generation, autoplayBlocked || !autoplay);
+
+    const basic = info.basic_info;
+    return {
+      videoId,
+      title: basic.title ?? '',
+      author: basic.author ?? '',
+      durationSec: basic.duration ?? Math.round(player.seekRange().end),
+      thumbnails: [...(basic.thumbnail ?? [])]
+        .map((t) => ({ url: t.url, width: t.width, height: t.height }))
+        .sort((a, b) => b.width - a.width),
+      client,
+      format,
+      stream: { ...selected.stats, mode },
+      loudnessDb: info.player_config?.audio_config?.loudness_db ?? null,
+    };
   }
 
   /**
-   * Streams direct audio formats natively via `<audio src="/api/stream?url=...">`.
-   * Essential for iPhone / iOS Safari (which doesn't support Media Source Extensions on `<audio>`)
-   * and gives full byte-range scrubbing + Lock Screen controls.
+   * Detaches Shaka and plays a direct audio URL natively via `<audio src="/api/stream?url=...">`.
+   * Used by both YouTube direct streams and JioSaavn fallback streams across desktop, Android, and iPhone Safari.
    */
-  private async startNativeDirectStream(
-    resolved: ResolvedPlayer,
+  private async playProxiedAudioUrl(
+    videoId: string,
+    rawUrl: string,
     startSec: number,
     autoplay: boolean,
     generation: number,
-  ): Promise<LoadedTrack> {
-    const { videoId, client, info, signed } = resolved;
+  ): Promise<void> {
     if (this.player) {
       await this.player.unload().catch(() => {});
       await this.player.detach().catch(() => {});
@@ -303,6 +338,42 @@ export class YouTubeEngine {
     this.adapter?.dispose();
     this.adapter = null;
     this.usingNativeAudio = true;
+
+    this.audio.preload = 'auto';
+    this.audio.src = proxyStreamUrl(rawUrl);
+    this.audio.load();
+
+    if (startSec > 0) {
+      const applyStart = () => {
+        if (generation === this.generation && Number.isFinite(startSec)) {
+          this.audio.currentTime = startSec;
+        }
+      };
+      if (this.audio.readyState >= HTMLMediaElement.HAVE_METADATA) applyStart();
+      else this.audio.addEventListener('loadedmetadata', applyStart, { once: true });
+    }
+
+    let autoplayBlocked = false;
+    if (autoplay) {
+      await this.audio.play().catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'NotAllowedError') {
+          autoplayBlocked = true;
+          trackLog.w('autoplay was blocked by the browser; waiting for a tap', videoId);
+        } else {
+          throw error;
+        }
+      });
+    }
+    await this.firstAudio(generation, autoplayBlocked || !autoplay);
+  }
+
+  private async startNativeDirectStream(
+    resolved: ResolvedPlayer,
+    startSec: number,
+    autoplay: boolean,
+    generation: number,
+  ): Promise<LoadedTrack> {
+    const { videoId, client, info, signed } = resolved;
     this.current = { videoId, client, signed };
     this.direct = resolved;
 
@@ -341,33 +412,7 @@ export class YouTubeEngine {
     }
     this.checkCurrent(generation);
 
-    const proxied = proxyStreamUrl(streamUrl.toString());
-    this.audio.preload = 'auto';
-    this.audio.src = proxied;
-    this.audio.load();
-
-    if (startSec > 0) {
-      const applyStart = () => {
-        if (generation === this.generation && Number.isFinite(startSec)) {
-          this.audio.currentTime = startSec;
-        }
-      };
-      if (this.audio.readyState >= HTMLMediaElement.HAVE_METADATA) applyStart();
-      else this.audio.addEventListener('loadedmetadata', applyStart, { once: true });
-    }
-
-    let autoplayBlocked = false;
-    if (autoplay) {
-      await this.audio.play().catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'NotAllowedError') {
-          autoplayBlocked = true;
-          trackLog.w('autoplay was blocked by the browser; waiting for a tap', videoId);
-        } else {
-          throw error;
-        }
-      });
-    }
-    await this.firstAudio(generation, autoplayBlocked);
+    await this.playProxiedAudioUrl(videoId, streamUrl.toString(), startSec, autoplay, generation);
 
     const isAac = isMp4Audio(best.mime_type);
     const codec = isAac ? 'AAC' : best.mime_type?.includes('opus') ? 'Opus' : codecName(best.mime_type ?? null);
@@ -398,26 +443,36 @@ export class YouTubeEngine {
     };
   }
 
-  /**
-   * A plain DASH manifest over the response's own audio URLs, fetched through `/api/stream`.
-   */
-  private async directManifest({ videoId, client, info }: ResolvedPlayer): Promise<string> {
-    for (const scheme of ['http', 'https']) {
-      shaka.net.NetworkingEngine.registerScheme(
-        scheme,
-        shaka.net.HttpFetchPlugin.parse,
-        shaka.net.NetworkingEngine.PluginPriority.FALLBACK,
-      );
-    }
-    const pot = usesWebPo(client) ? await botguard.mint(videoId) : undefined;
-    return info.toDash({
-      format_filter: (format) => format.has_video || !format.has_audio,
-      url_transformer: (url) => {
-        if (pot) url.searchParams.set('pot', pot);
-        return new URL(proxyStreamUrl(url.toString()));
+  private async startExternalDirectStream(
+    videoId: string,
+    saavn: SaavnFallbackStream,
+    startSec: number,
+    autoplay: boolean,
+    generation: number,
+  ): Promise<LoadedTrack> {
+    this.current = null;
+    this.direct = null;
+    await this.playProxiedAudioUrl(videoId, saavn.url, startSec, autoplay, generation);
+
+    const bitrateKbps = saavn.kbps ?? 320;
+    return {
+      videoId,
+      title: saavn.title,
+      author: saavn.author,
+      durationSec: saavn.durationSec || (Number.isFinite(this.audio.duration) ? Math.round(this.audio.duration) : 0),
+      thumbnails: saavn.thumbnail ? [{ url: saavn.thumbnail, width: 500, height: 500 }] : [],
+      client: 'VISIONOS',
+      format: `saavn aac ${bitrateKbps}kbps direct`,
+      stream: {
+        codec: 'AAC',
+        itag: 'saavn',
+        bitrateKbps,
+        sampleRateHz: 44100,
+        channels: 2,
+        mode: 'direct',
       },
-      manifest_options: { include_thumbnails: false },
-    });
+      loudnessDb: null,
+    };
   }
 
   /**
@@ -481,7 +536,7 @@ export class YouTubeEngine {
       const response = await playerRequest(yt, videoId, client, reloadContext);
       const reloaded = new YT.VideoInfo([response], yt.actions, Utils.generateRandomString(16));
       const rawReloadUrl = await yt.session.player!.decipher(reloaded.streaming_data?.server_abr_streaming_url);
-      adapter.setStreamingURL(rawReloadUrl ? proxyStreamUrl(rawReloadUrl) : rawReloadUrl);
+      adapter.setStreamingURL(rawReloadUrl);
       adapter.setUstreamerConfig(
         (reloaded.player_config ?? info.player_config)?.media_common_config.media_ustreamer_request_config
           ?.video_playback_ustreamer_config,
@@ -492,7 +547,7 @@ export class YouTubeEngine {
     this.adapter = adapter;
 
     const rawStreamingUrl = await yt.session.player!.decipher(streaming.server_abr_streaming_url);
-    adapter.setStreamingURL(rawStreamingUrl ? proxyStreamUrl(rawStreamingUrl) : rawStreamingUrl);
+    adapter.setStreamingURL(rawStreamingUrl);
     adapter.setUstreamerConfig(info.player_config?.media_common_config.media_ustreamer_request_config?.video_playback_ustreamer_config);
     adapter.setServerAbrFormats(streaming.adaptive_formats.map(buildSabrFormat));
 
@@ -530,6 +585,9 @@ export class YouTubeEngine {
   /** Resolves once the element has data to play, or rejects after the timeout or media error. */
   private firstAudio(generation: number, allowLoadedMetadata = false): Promise<void> {
     const audio = this.audio;
+    if (audio.error) {
+      return Promise.reject(new Error(`Audio element error (${audio.error.code})`));
+    }
     const targetReadyState = allowLoadedMetadata ? HTMLMediaElement.HAVE_METADATA : HTMLMediaElement.HAVE_FUTURE_DATA;
     if (audio.readyState >= targetReadyState) return Promise.resolve();
     return new Promise((resolve, reject) => {
@@ -574,7 +632,7 @@ export class YouTubeEngine {
     excludeClient(current.videoId, current.client, `stream error ${error.code}`, current.signed);
     const resumeAt = this.audio.currentTime;
     const wasPlaying = !this.audio.paused;
-    this.load(current.videoId, { startSec: resumeAt, autoplay: wasPlaying })
+    this.load(current.videoId, { startSec: resumeAt, autoplay: wasPlaying, hint: this.currentHint ?? undefined })
       .then((track) => this.onRecovered(track))
       .catch((failure: unknown) => {
         if (failure instanceof SupersededError) return;
@@ -586,6 +644,7 @@ export class YouTubeEngine {
   async stop(): Promise<void> {
     this.generation++;
     this.current = null;
+    this.currentHint = null;
     this.direct = null;
     if (this.usingNativeAudio) {
       this.audio.pause();

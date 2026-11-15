@@ -8,6 +8,55 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Expose-Headers': '*',
 };
 
+type YouTubeClientHeaders = {
+  ua: string;
+  isWeb: boolean;
+  origin?: string;
+};
+
+function resolveYouTubeClientHeaders(clientNameRaw?: string | null, hostname?: string): YouTubeClientHeaders {
+  const c = (clientNameRaw ?? '').trim().toUpperCase();
+  switch (c) {
+    case 'VISIONOS':
+      return {
+        ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+        isWeb: false,
+      };
+    case 'IOS':
+      return {
+        ua: 'com.google.ios.youtube/21.29.1 (iPhone16,2; U; CPU iOS 18_5 like Mac OS X;)',
+        isWeb: false,
+      };
+    case 'ANDROID_VR':
+      return {
+        ua: 'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+        isWeb: false,
+      };
+    case 'ANDROID':
+      return {
+        ua: 'com.google.android.youtube/21.26.364 (Linux; U; Android 15; en_US; Pixel 9 Pro; Build/AP4A.250205.002; Cronet/132.0.6834.79) gzip',
+        isWeb: false,
+      };
+    case 'ANDROID_MUSIC':
+      return {
+        ua: 'com.google.android.apps.youtube.music/8.39.42 (Linux; U; Android 15; en_US; Pixel 9 Pro; Build/AP4A.250205.002) gzip',
+        isWeb: false,
+      };
+    case 'MWEB':
+      return {
+        ua: 'Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)',
+        isWeb: true,
+        origin: 'https://m.youtube.com',
+      };
+    case 'WEB_REMIX':
+      return { ua: CHROME_UA, isWeb: true, origin: 'https://music.youtube.com' };
+    default: {
+      const origin = hostname?.toLowerCase() === 'music.youtube.com' ? 'https://music.youtube.com' : 'https://www.youtube.com';
+      return { ua: CHROME_UA, isWeb: true, origin };
+    }
+  }
+}
+
 function validateTargetUrl(rawUrl: string | null): URL | null {
   if (!rawUrl) return null;
   try {
@@ -47,12 +96,15 @@ export async function onRequest(context: { request: Request }): Promise<Response
     const contentType = request.headers.get('content-type');
     if (contentType) headers['Content-Type'] = contentType;
 
-    // googlevideo rejects VISIONOS/ANDROID/IOS direct URLs with 403 when a YouTube Origin is attached.
-    const clientParam = target.searchParams.get('c')?.toUpperCase();
-    const skipOrigin = clientParam === 'VISIONOS' || clientParam === 'ANDROID' || clientParam === 'IOS';
-    if (!skipOrigin) {
-      headers['Origin'] = 'https://www.youtube.com';
-      headers['Referer'] = 'https://www.youtube.com/';
+    // googlevideo requires User-Agent/Origin to match the issuing client; native clients reject Origin/Referer.
+    const host = target.hostname.toLowerCase();
+    if (host.endsWith('googlevideo.com') || host.endsWith('youtube.com')) {
+      const clientInfo = resolveYouTubeClientHeaders(target.searchParams.get('c'), host);
+      headers['User-Agent'] = clientInfo.ua;
+      if (clientInfo.isWeb && clientInfo.origin) {
+        headers['Origin'] = clientInfo.origin;
+        headers['Referer'] = `${clientInfo.origin}/`;
+      }
     }
 
     const method = request.method.toUpperCase();

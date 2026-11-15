@@ -166,7 +166,12 @@ export function Lcd() {
           <span className={titleClass}>{status === 'loading' ? 'Loading…' : ''}</span>
         )}
         {status === 'error' ? (
-          <span className="truncate type-callout-medium text-key">{error}</span>
+          <span
+            className="line-clamp-2 whitespace-normal text-[11px] leading-[13px] font-medium text-key"
+            title={error ?? undefined}
+          >
+            {error}
+          </span>
         ) : (
           <span className="truncate type-callout-medium text-secondary">
             {artist ? <Credits videoId={videoId} line={artist} artists={track?.artists ?? []} /> : status === 'loading' ? 'Loading…' : ''}
