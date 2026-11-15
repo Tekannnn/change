@@ -44,11 +44,11 @@
   --mini-player-height: 52px;
 
   /* ---- Radii ------------------------------------------------------------- */
-  --radius-artwork-small: 5px; /* 40px track rows, horizontal lockups */
-  --radius-artwork-medium: 7px; /* square lockups */
-  --radius-artwork-large: 10px; /* album header, editorial cards */
-  --radius-nav-item: 8px;
-  --radius-track-row: 6px;
+  --radius-artwork-small: 7px; /* 40px track rows, horizontal lockups */
+  --radius-artwork-medium: 12px; /* square lockups */
+  --radius-artwork-large: 16px; /* album header, editorial cards */
+  --radius-nav-item: 10px;
+  --radius-track-row: 8px;
   --radius-pill: 1000px;
 
   /* ---- Motion ------------------------------------------------------------ */
@@ -65,29 +65,29 @@
   --z-contextual-menus: 9951;
   --z-modal: 10001;
 
-  /* ---- Colour: light ----------------------------------------------------- */
+  /* ---- Colour: light (Warm Ivory Studio) --------------------------------- */
   color-scheme: light;
 
-  --pageBG: #ffffff;
-  --pageBG-rgb: 255, 255, 255;
+  --pageBG: #f7f5f0;
+  --pageBG-rgb: 247, 245, 240;
 
-  --systemPrimary: #000000e0;
-  --systemSecondary: #0000008f;
-  --systemTertiary: #0000007a;
-  --systemQuaternary: #0000001a;
-  --systemQuinary: #0000000d;
+  --systemPrimary: #141416eb;
+  --systemSecondary: #14141699;
+  --systemTertiary: #14141666;
+  --systemQuaternary: #1414161a;
+  --systemQuinary: #1414160d;
 
-  --systemPrimary-onDark: #ffffffeb;
-  --systemSecondary-onDark: #ffffffa3;
-  --systemTertiary-onDark: #ffffff66;
+  --systemPrimary-onDark: #f7f5f0f0;
+  --systemSecondary-onDark: #f7f5f0a3;
+  --systemTertiary-onDark: #f7f5f066;
 
-  --keyColor: #d60017;
-  --keyColor-rgb: 214, 0, 23;
-  --keyColor-rollover: #a20000;
-  --keyColor-pressed: #bb0000;
-  --keyColorBG: #d60017;
-  --selectionColor: #d60017;
-  --keyColor-focus-color: rgba(var(--keyColor-rgb), 0.6);
+  --keyColor: #b87a1e;
+  --keyColor-rgb: 184, 122, 30;
+  --keyColor-rollover: #9e6614;
+  --keyColor-pressed: #85550e;
+  --keyColorBG: #b87a1e;
+  --selectionColor: #b87a1e;
+  --keyColor-focus-color: rgba(var(--keyColor-rgb), 0.55);
 
   --systemRed: #ff3b30;
   --systemGreen: #28cd41;
@@ -155,21 +155,21 @@
   :root {
     color-scheme: dark;
 
-    --pageBG: #1f1f1f;
-    --pageBG-rgb: 31, 31, 31;
+    --pageBG: #0b0b0d;
+    --pageBG-rgb: 11, 11, 13;
 
-    --systemPrimary: #ffffffeb;
-    --systemSecondary: #ffffffa3;
-    --systemTertiary: #ffffff66;
-    --systemQuaternary: #ffffff1a;
-    --systemQuinary: #ffffff0d;
+    --systemPrimary: #f5f3eef0;
+    --systemSecondary: #f5f3eea3;
+    --systemTertiary: #f5f3ee66;
+    --systemQuaternary: #ffffff18;
+    --systemQuinary: #ffffff0c;
 
-    --keyColor: #fa586a;
-    --keyColor-rgb: 250, 88, 106;
-    --keyColor-rollover: #ff5f7a;
-    --keyColor-pressed: #ff4661;
-    --keyColorBG: #fa233b;
-    --selectionColor: #c11b2e;
+    --keyColor: #e5a952;
+    --keyColor-rgb: 229, 169, 82;
+    --keyColor-rollover: #f2be6d;
+    --keyColor-pressed: #c98f3a;
+    --keyColorBG: #e5a952;
+    --selectionColor: #e5a952;
 
     --systemRed: #ff453a;
     --systemGreen: #32d74b;
@@ -179,38 +179,38 @@
     --systemGray3: #48484a;
     --systemGray4: #3a3a3c;
     --systemGray5: #2c2c2e;
-    --systemGray6: #1c1c1e;
+    --systemGray6: #16161a;
 
-    --labelDivider: #ffffff1a;
-    --vibrantDivider: #ebebf530;
+    --labelDivider: #ffffff14;
+    --vibrantDivider: #ebebf524;
 
-    --glassMaterialBackground: #26262899;
-    --glassMaterialShadowColor: #00000033;
+    --glassMaterialBackground: #121216d1;
+    --glassMaterialShadowColor: #0000004d;
     --glassMaterialInnerStroke: #ffffff;
-    --glassMaterialInnerStrokeAlpha: 0.25;
+    --glassMaterialInnerStrokeAlpha: 0.1;
 
-    --systemStandardThinMaterialSover: #28282880;
-    --systemStandardThickMaterialSover: #282828b3;
-    --systemHeaderMaterialSover: #1e1e1ecc;
+    --systemStandardThinMaterialSover: #14141899;
+    --systemStandardThickMaterialSover: #141418cc;
+    --systemHeaderMaterialSover: #0b0b0de0;
 
-    --navSidebarSelectedState: #ffffff0d;
-    --tracklistHoverColor: #ffffff0f;
-    --shelfBG: #ffffff0d;
-    --opaqueShelfBG: #2b2b2b;
-    --footerBg: #323232;
-    --genericJoeColor: #323232;
-    --searchBarBorderColor: #ffffff26;
+    --navSidebarSelectedState: #e5a9521a;
+    --tracklistHoverColor: #ffffff0a;
+    --shelfBG: #ffffff08;
+    --opaqueShelfBG: #141418;
+    --footerBg: #121216;
+    --genericJoeColor: #1c1c22;
+    --searchBarBorderColor: #ffffff1f;
     --segmentedControlBG: #7676803d;
-    --segmentedControlSelectedBG: #636366;
-    --button-pill-color: #000000;
-    --button-pill-background-color: #ffffff;
-    --radiosityShadowColor: #0000004d;
-    --dialogShadowColor: #0000008c;
+    --segmentedControlSelectedBG: #2c2c34;
+    --button-pill-color: #0b0b0d;
+    --button-pill-background-color: #e5a952;
+    --radiosityShadowColor: #00000066;
+    --dialogShadowColor: #00000099;
 
     --containerInnerStroke: #ffffff;
-    --containerInnerStrokeAlpha: 0.25;
+    --containerInnerStrokeAlpha: 0.12;
 
-    --skeleton-fill: #ffffff12;
+    --skeleton-fill: #ffffff0e;
     --skeleton-shimmer: #ffffff14;
   }
 }

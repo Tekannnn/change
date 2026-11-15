@@ -47,7 +47,7 @@ export function PlayerBar() {
   return (
     // The side panel overlays the page; the pill re-centres in what's left.
     <div
-      className="pointer-events-none absolute right-0 bottom-(--player-bottom-offset) left-(--web-navigation-width) z-[calc(var(--z-web-chrome)-1)] flex justify-center px-5 transition-[padding-inline-end] duration-(--duration-panel) ease-panel data-[panel-open=true]:pe-[calc(var(--side-panel-width)+20px)] max-sm:left-0 max-sm:px-2.5 max-sm:bottom-[max(10px,env(safe-area-inset-bottom))] max-sm:data-[panel-open=true]:pe-2.5"
+      className="pointer-events-none absolute right-0 bottom-(--player-bottom-offset) left-(--web-navigation-width) z-[calc(var(--z-web-chrome)-1)] flex justify-center px-5 transition-[padding-inline-end] duration-(--duration-panel) ease-panel data-[panel-open=true]:pe-[calc(var(--side-panel-width)+20px)] max-sm:left-0 max-sm:px-3 max-sm:bottom-[calc(max(10px,env(safe-area-inset-bottom))+64px)] max-sm:data-[panel-open=true]:pe-3"
       data-panel-open={sidePanel !== null}
     >
       <div

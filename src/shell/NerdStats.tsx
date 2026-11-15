@@ -15,9 +15,12 @@ export function NerdStats() {
   const automix = usePlayer((s) => s.automix);
   if (!show || !nowPlaying) return null;
   return (
-    // The phone's shadow: free on the dark mesh, and what keeps it legible over a bright music video.
-    <div className="mt-1 flex min-w-0 flex-col gap-px type-[500_11px/14px] tabular-nums [text-shadow:0_1px_4px_rgb(0_0_0/0.55)]">
-      <span className="truncate text-secondary">{describeStream(nowPlaying) ?? 'Measuring the stream…'}</span>
+    // Studio DAC badge pill for audio codec, bitrate and sample rate.
+    <div className="mt-2 flex min-w-0 flex-col items-start gap-1 tabular-nums">
+      <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full border border-white/12 bg-white/[0.06] px-2.5 py-1 font-mono text-[10.5px] font-medium tracking-[0.06em] text-secondary uppercase backdrop-blur-md">
+        <span className="size-1.5 flex-none rounded-full bg-key" aria-hidden="true" />
+        <span className="truncate">{describeStream(nowPlaying) ?? 'Measuring stream…'}</span>
+      </span>
       {automix && <AutomixLine videoId={nowPlaying.videoId} />}
     </div>
   );

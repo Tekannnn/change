@@ -5,6 +5,7 @@ import { startLivePresence } from '@/playback/livePresence';
 import { Outlet } from 'react-router';
 import { useUi } from '@/state/ui';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
+import { MobileBottomDock } from './MobileBottomDock';
 import { MobileTopBar } from './MobileTopBar';
 import { OwnerCreditPopup } from './OwnerCreditPopup';
 import { PlayerBar } from './PlayerBar';
@@ -40,12 +41,13 @@ export function AppShell() {
           id="scrollable-page"
           className="absolute inset-0 overflow-x-hidden overflow-y-auto pl-(--web-navigation-width) [scrollbar-gutter:stable] data-tint:bg-(--page-tint) data-tint:transition-[background-color] data-tint:duration-300 data-tint:ease-in max-sm:pt-(--mobile-top-bar-height) max-sm:pl-0"
         >
-          {/* Clears the floating pill: its height, its offset, and some air. */}
-          <div className="min-h-full pb-[calc(var(--player-pill-height)+var(--player-bottom-offset)+40px)]">
+          {/* Clears the floating pill (and mobile bottom dock): height, offset, and breathing room. */}
+          <div className="min-h-full pb-[calc(var(--player-pill-height)+var(--player-bottom-offset)+40px)] max-sm:pb-[calc(var(--player-pill-height)+108px)]">
             <Outlet />
           </div>
         </main>
         <PlayerBar />
+        <MobileBottomDock />
         <SidePanel />
       </div>
       {fullScreen && (

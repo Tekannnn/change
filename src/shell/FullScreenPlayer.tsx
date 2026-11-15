@@ -58,11 +58,11 @@ function Scrubber() {
           <MixWindowHighlight />
           <div
             ref={bar}
-            className="relative size-full origin-left scale-x-(--progress) bg-secondary transition-[background-color] duration-120 ease-in [--progress:0] group-hover/hit:bg-primary group-data-dragging/scrub:bg-primary"
+            className="relative size-full origin-left scale-x-(--progress) bg-key shadow-[0_0_12px_rgba(229,169,82,0.55)] transition-[background-color] duration-120 ease-in [--progress:0]"
           />
         </div>
       </div>
-      <div className="relative mt-0.5 flex justify-between type-[500_11px/14px] tabular-nums text-tertiary">
+      <div className="relative mt-1 flex justify-between font-mono text-[11px] font-medium tracking-[0.03em] tabular-nums text-tertiary">
         <span ref={elapsed} />
         <span ref={mixLabel} className="pointer-events-none absolute inset-x-0 text-center text-secondary opacity-0" aria-hidden="true">
           Mixing
@@ -96,8 +96,13 @@ function Transport() {
       <button className={skip} disabled={!hasTrack} aria-label="Previous" onClick={previous}>
         <BackwardIcon size={40} />
       </button>
-      <button className={`${transportButton} size-14 text-primary`} disabled={!hasTrack} aria-label={playing ? 'Pause' : 'Play'} onClick={togglePlay}>
-        {playing ? <PauseIcon size={48} /> : <PlayIcon size={48} />}
+      <button
+        className="grid size-14 place-items-center rounded-full bg-key-bg text-[#0b0b0d] shadow-[0_8px_28px_rgba(229,169,82,0.38)] transition-[transform,filter] duration-150 ease-out hover:brightness-110 active:scale-92 disabled:opacity-40"
+        disabled={!hasTrack}
+        aria-label={playing ? 'Pause' : 'Play'}
+        onClick={togglePlay}
+      >
+        {playing ? <PauseIcon size={32} /> : <PlayIcon size={32} />}
       </button>
       <button className={skip} disabled={!hasTrack || !hasNext} aria-label="Next" onClick={next}>
         <ForwardIcon size={40} />
