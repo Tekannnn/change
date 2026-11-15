@@ -24,6 +24,13 @@ function setCorsHeaders(res) {
 
 function resolveYouTubeClientHeaders(clientNameRaw, hostname) {
   const c = (clientNameRaw ?? '').trim().toUpperCase();
+  const hostLower = hostname?.toLowerCase() ?? '';
+  const hostOrigin =
+    hostLower === 'music.youtube.com'
+      ? 'https://music.youtube.com'
+      : hostLower === 'm.youtube.com'
+        ? 'https://m.youtube.com'
+        : 'https://www.youtube.com';
   switch (c) {
     case 'VISIONOS':
       return {
@@ -54,14 +61,11 @@ function resolveYouTubeClientHeaders(clientNameRaw, hostname) {
       return {
         ua: 'Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)',
         isWeb: true,
-        origin: 'https://m.youtube.com',
+        origin: hostOrigin,
       };
     case 'WEB_REMIX':
-      return { ua: CHROME_UA, isWeb: true, origin: 'https://music.youtube.com' };
-    default: {
-      const origin = hostname?.toLowerCase() === 'music.youtube.com' ? 'https://music.youtube.com' : 'https://www.youtube.com';
-      return { ua: CHROME_UA, isWeb: true, origin };
-    }
+    default:
+      return { ua: CHROME_UA, isWeb: true, origin: hostOrigin };
   }
 }
 
