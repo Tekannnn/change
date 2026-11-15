@@ -27,7 +27,7 @@ const DEFAULTS: Saved = {
   order: LYRICS_SOURCES.map((s) => s.id),
   // The keyed routes do nothing without a key; off until one is entered.
   disabled: ['paxsenix-spotify', 'paxsenix-musixmatch'],
-  preferSyllables: false,
+  preferSyllables: true,
   paxsenixKey: '',
 };
 

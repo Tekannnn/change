@@ -1,5 +1,4 @@
 import { ListMusic, Settings } from 'lucide-react';
-import { SiSpotify } from 'react-icons/si';
 import { PrefetchLink, PrefetchNavLink } from '@/components/PrefetchLink';
 import { LogoMark } from '@/components/icons/LogoMark';
 import {
@@ -17,8 +16,6 @@ import {
 import { hrefFor } from '@/components/music/links';
 import { LIBRARY_SECTIONS, type LibrarySection } from '@/data/music/library';
 import { useLibraryPlaylists, useSignedIn } from '@/data/music/queries';
-import { useSpotifyPlaylists } from '@/data/spotify/queries';
-import { useSpotifySignedIn } from '@/extension/useSpotifyAuth';
 import { useUi } from '@/state/ui';
 
 interface NavItem {
@@ -102,40 +99,11 @@ function LibraryNav({ onNavigate }: { onNavigate: () => void }) {
   );
 }
 
-/** Spotify's playlists, once signed in. */
-function SpotifyNav({ onNavigate }: { onNavigate: () => void }) {
-  const playlists = useSpotifyPlaylists();
-  return (
-    <>
-      <h2 className={sectionHeader}>Spotify</h2>
-      <ul className={list}>
-        <li>
-          <PrefetchNavLink to="/spotify" end className={item} onClick={onNavigate}>
-            <AllPlaylistsIcon size={24} className={icon} />
-            <span className={navLabel}>All Spotify Playlists</span>
-          </PrefetchNavLink>
-        </li>
-        {playlists.data?.map((playlist) => (
-          <li key={playlist.id}>
-            <PrefetchNavLink to={`/spotify/playlist/${encodeURIComponent(playlist.id)}`} className={item} onClick={onNavigate}>
-              <span className={icon}>
-                <ListMusic size={17} strokeWidth={1.8} />
-              </span>
-              <span className={navLabel}>{playlist.name}</span>
-            </PrefetchNavLink>
-          </li>
-        ))}
-      </ul>
-    </>
-  );
-}
-
 /** The left glass sidebar (report §1). */
 export function Sidebar() {
   const drawerOpen = useUi((s) => s.drawerOpen);
   const setDrawerOpen = useUi((s) => s.setDrawerOpen);
   const signedIn = useSignedIn();
-  const spotifySignedIn = useSpotifySignedIn();
   const close = () => setDrawerOpen(false);
 
   return (
@@ -156,23 +124,13 @@ export function Sidebar() {
         <div className="min-h-0 flex-1 overflow-y-auto pr-3 pl-5 [scrollbar-width:none]">
           <NavList items={PRIMARY} onNavigate={close} />
           {signedIn && <LibraryNav onNavigate={close} />}
-          {spotifySignedIn && <SpotifyNav onNavigate={close} />}
         </div>
-        <div className="flex items-center justify-between gap-2 pt-3 pr-3 pb-5 pl-5">
-          <PrefetchNavLink to="/spotify" className={`${item} mb-0 flex-1`} onClick={close}>
+        <div className="pt-3 pr-3 pb-5 pl-5">
+          <PrefetchNavLink to="/settings" className={`${item} mb-0`} onClick={close}>
             <span className={icon}>
-              <SiSpotify size={18} color="#1ed760" />
+              <Settings size={18} strokeWidth={1.9} />
             </span>
-            <span className={navLabel}>Connect Spotify</span>
-          </PrefetchNavLink>
-          <PrefetchNavLink
-            to="/settings"
-            className="grid size-8 flex-none place-items-center rounded-nav text-secondary hover:bg-quinary hover:text-primary aria-[current=page]:bg-quinary aria-[current=page]:text-primary"
-            aria-label="Settings"
-            title="Settings"
-            onClick={close}
-          >
-            <Settings size={17} strokeWidth={1.9} />
+            <span className={navLabel}>Settings</span>
           </PrefetchNavLink>
         </div>
       </nav>

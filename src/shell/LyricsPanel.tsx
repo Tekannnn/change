@@ -1,18 +1,11 @@
 // Registers <am-lyrics>.
 import '@uimaxbai/am-lyrics/am-lyrics.js';
-import { Check, ChevronDown, Loader2, Minus, Settings2 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useCanvas } from '@/data/spotify/canvas';
-import { getBridge } from '@/extension/bridge';
-import { Menu, MenuHeader, MenuItem, MenuSeparator } from '@/components/Menu';
 import { LyricClock } from '@/lyrics/clock';
-import { onUngrantedChange, ungrantedOrigins } from '@/lyrics/http';
-import type { SourceState } from '@/lyrics/repository';
-import { enabledSources } from '@/lyrics/settings';
-import { sourceById, type LyricsSourceId } from '@/lyrics/sources';
-import { useLyrics, useLyricsUi } from '@/lyrics/useLyrics';
+import { useLyrics } from '@/lyrics/useLyrics';
 import { getAudio, getPlayhead, usePlayer } from '@/state/player';
-import { LyricsSettings } from './LyricsSettings';
 
 type AmLyricsElement = HTMLElement & {
   currentTime: number;
@@ -228,114 +221,6 @@ function LyricsView({ ttml, full }: { ttml: string; full: boolean }) {
   );
 }
 
-function useUngranted(): string[] {
-  return useSyncExternalStore(onUngrantedChange, () => [...ungrantedOrigins].join(','), () => '')
-    .split(',')
-    .filter(Boolean);
-}
-
-const NO_STATES: Partial<Record<LyricsSourceId, SourceState>> = {};
-
-/** The provider picker: which provider these lyrics are from, and the others' answers for this track. */
-function ProviderPicker({ current, full }: { current: LyricsSourceId | null; full: boolean }) {
-  const videoId = usePlayer((s) => s.nowPlaying?.videoId ?? '');
-  const states = useLyricsUi((s) => s.states[videoId]) ?? NO_STATES;
-  const picked = useLyricsUi((s) => s.picked[videoId]);
-  const pick = useLyricsUi((s) => s.pick);
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const [settings, setSettings] = useState(false);
-  const close = useCallback(() => setAnchor(null), []);
-  const label = current ? sourceById(current)?.label : 'Lyrics';
-
-  return (
-    // In full screen the picker sits quietly above the lines, shown on hover.
-    <div
-      className={
-        full
-          ? 'flex items-center justify-between pb-1 opacity-0 transition-opacity duration-200 group-hover/panel:opacity-100 focus-within:opacity-100'
-          : 'flex items-center justify-between px-4 pt-4 pb-1'
-      }
-    >
-      <button
-        className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 type-callout-emphasized text-secondary hover:bg-quinary"
-        aria-haspopup="menu"
-        onClick={(e) => setAnchor(e.currentTarget)}
-      >
-        <span>{label}</span>
-        <ChevronDown size={14} />
-      </button>
-      <button
-        className="grid size-7 place-items-center rounded-[8px] text-secondary hover:bg-quinary"
-        aria-label="Lyric settings"
-        onClick={() => setSettings(true)}
-      >
-        <Settings2 size={16} />
-      </button>
-      {anchor && (
-        <Menu anchor={anchor} placement="below-end" onClose={close} label="Lyrics provider">
-          <MenuItem checked={!picked} onSelect={() => (close(), pick(videoId, null))}>
-            Best available
-          </MenuItem>
-          <MenuSeparator />
-          <MenuHeader>Providers</MenuHeader>
-          {enabledSources().map((id) => {
-            const state = states[id];
-            return (
-              <MenuItem
-                key={id}
-                checked={picked === id}
-                trailing={
-                  state === 'pending' ? (
-                    <Loader2 size={13} className="animate-spin" />
-                  ) : state === 'found' ? (
-                    <Check size={13} />
-                  ) : state === 'missing' ? (
-                    <Minus size={13} />
-                  ) : undefined
-                }
-                onSelect={() => (close(), pick(videoId, id))}
-              >
-                {sourceById(id)?.label}
-              </MenuItem>
-            );
-          })}
-          <MenuSeparator />
-          <MenuItem onSelect={() => (close(), setSettings(true))}>Lyric Settings…</MenuItem>
-        </Menu>
-      )}
-      {settings && <LyricsSettings onClose={() => setSettings(false)} />}
-    </div>
-  );
-}
-
-function PermissionNotice({ origins }: { origins: string[] }) {
-  const names = origins.map((o) => new URL(o).host.replace(/^www\./, ''));
-  return (
-    <div className="mx-4 my-1.5 flex items-center gap-2.5 rounded-[10px] bg-quinary px-2.5 py-2 type-callout text-secondary">
-      <span>
-        {names.slice(0, 2).join(', ')}
-        {names.length > 2 ? ` and ${names.length - 2} more` : ''} need the extension’s permission.
-      </span>
-      <button
-        className="flex-none type-callout-emphasized text-key"
-        // The notice stays until the extension confirms the grant (checked when this tab comes back).
-        onClick={() => void getBridge()?.call('lyrics.requestPermissions', { origins })}
-      >
-        Allow
-      </button>
-    </div>
-  );
-}
-
-/**
- * The track's Spotify Canvas behind the lyrics, dimmed so they stay legible.
- * Muted and looping, it fades in once it can play and pauses with the music.
- *
- * The blur runs on a quarter-size video that is then scaled up 4×: a 3px blur
- * there reads as about 12px on screen for a sixteenth of the pixels, which is
- * what keeps a blurred, playing video cheap. The 5% overscan on each side
- * keeps the soft edges out of view.
- */
 function CanvasBackdrop({ url }: { url: string }) {
   const video = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
@@ -378,11 +263,6 @@ const fullSizes =
 export function LyricsPanel({ variant = 'panel' }: { variant?: 'panel' | 'full' }) {
   const lyrics = useLyrics();
   const hasTrack = usePlayer((s) => s.nowPlaying !== null);
-  const videoId = usePlayer((s) => s.nowPlaying?.videoId ?? '');
-  // A provider picked by hand that came back with nothing is named in the
-  // empty state: the lyrics didn't go missing, this one provider hasn't got them.
-  const picked = useLyricsUi((s) => s.picked[videoId]);
-  const ungranted = useUngranted();
   const canvas = useCanvas();
   const fontReady = useLyricFont();
   const result = lyrics.data;
@@ -395,9 +275,11 @@ export function LyricsPanel({ variant = 'panel' }: { variant?: 'panel' | 'full' 
   return (
     <div className={full ? `${panel} ${fullSizes}` : panel}>
       {canvas && variant === 'panel' && <CanvasBackdrop url={canvas} />}
-      <ProviderPicker current={result?.source ?? null} full={full} />
-      {/* Only worth raising when nothing was found: then the hosts behind the extension might have it. */}
-      {ungranted.length > 0 && !result && !lyrics.isFetching && <PermissionNotice origins={ungranted} />}
+      {!full && (
+        <div className="flex items-center px-5 pt-[23px] pb-3">
+          <h3 className="type-title-2-emphasized">Lyrics</h3>
+        </div>
+      )}
       {!hasTrack ? (
         <div className={empty}>
           <p className={emptyTitle}>No lyrics available</p>
@@ -409,15 +291,10 @@ export function LyricsPanel({ variant = 'panel' }: { variant?: 'panel' | 'full' 
         </div>
       ) : result ? (
         <LyricsView ttml={result.ttml} full={full} />
-      ) : picked ? (
-        <div className={empty}>
-          <p className={emptyTitle}>Not on {sourceById(picked)?.label ?? 'this provider'}</p>
-          <p>This provider hasn’t got this song. Pick another, or Best available, in the list above.</p>
-        </div>
       ) : (
         <div className={empty}>
           <p className={emptyTitle}>No lyrics available</p>
-          <p>None of the lyric providers has this song. Try another in the list above.</p>
+          <p>Couldn’t find lyrics for this song.</p>
         </div>
       )}
     </div>
