@@ -58,8 +58,8 @@ export default function SettingsPage() {
             </label>
           )}
           <Toggle
-            label="Show Stats for Nerds"
-            detail="Codec, bitrate and sample rate under the artist in the full-screen player, and what Automix is doing."
+            label="Show Stats"
+            detail="Display codec, bitrate and sample rate"
             checked={showNerdStats}
             onChange={setShowNerdStats}
           />

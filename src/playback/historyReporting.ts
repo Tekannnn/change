@@ -6,6 +6,7 @@ import { extensionQueryKey } from '@/extension/useExtension';
 import { ensureYtAuth } from '@/extension/useYtAuth';
 import { queryClient } from '@/lib/queryClient';
 import { getAudio, onTrackEnded, usePlayer } from '@/state/player';
+import { recordLocalRecentTrack } from '@/data/music/localHistory';
 import { getSignedInnertube } from './youtube/innertube';
 import { trackLog } from './trackLog';
 
@@ -195,11 +196,36 @@ function close(): void {
   if (closing) void flush(closing, closing.heard, true);
 }
 
+let lastRecordedVideoId: string | null = null;
+
 function sample(): void {
-  const { nowPlaying, status } = usePlayer.getState();
+  const { nowPlaying, status, queue, index } = usePlayer.getState();
   const videoId = nowPlaying?.videoId ?? null;
   if (session && session.videoId !== videoId) close();
   if (!videoId || status !== 'playing') return;
+
+  if (nowPlaying && videoId !== lastRecordedVideoId) {
+    lastRecordedVideoId = videoId;
+    const entryTrack =
+      (index != null && index >= 0 ? queue?.[index]?.track : undefined) ??
+      queue?.find((e) => e.track.videoId === videoId)?.track;
+    recordLocalRecentTrack(
+      entryTrack?.videoId === videoId
+        ? entryTrack
+        : {
+            videoId,
+            title: nowPlaying.title,
+            artists: nowPlaying.artist ? [{ name: nowPlaying.artist, id: null }] : [],
+            album: null,
+            durationSec: nowPlaying.durationSec || null,
+            explicit: false,
+            thumbnail: nowPlaying.artworkUrl,
+            index: 1,
+            plays: null,
+          },
+    );
+    void queryClient.invalidateQueries({ queryKey: ['music', 'library', 'recent'] });
+  }
 
   if (!session) {
     if (opening === videoId || !VIDEO_ID.test(videoId)) return;

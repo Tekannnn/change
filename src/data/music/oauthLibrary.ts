@@ -1,7 +1,9 @@
 import type { Innertube } from 'youtubei.js/web';
 import { getInnertube, getSignedInnertube } from '@/playback/youtube/innertube';
+import { loadLocalRecentTracks, mergeRecentTracks } from './localHistory';
 import { LIKED_MUSIC_PLAYLIST, type LibrarySection } from './library';
-import type { ArtistRef, BrowsePage, MusicItem, PlaylistPage, Track } from './types';
+import { mapHome } from './mappers';
+import type { ArtistRef, BrowsePage, MusicItem, PlaylistPage, Shelf, Track } from './types';
 
 type Raw = Record<string, unknown>;
 
@@ -152,12 +154,50 @@ function extractPlaylists(root: unknown): MusicItem[] {
   return out;
 }
 
-function extractTracks(root: unknown): Track[] {
+const NON_MUSIC_RE =
+  /\b(podcast|episode|ep\.?\s*\d+|gameplay|walkthrough|playthrough|unboxing|reaction|vlog|tutorial|how\s+to|review|trailer|highlights?|full\s+movie|interview|livestream|live\s+stream|part\s+\d+|devlog|podcast)\b|#shorts\b/i;
+
+const MUSIC_HINT_RE =
+  /\b(official\s+(audio|video|music\s+video|lyric\s+video|visualizer)|lyrics?|lyric\s+video|audio|feat\.?|ft\.?|remix|acoustic|instrumental|cover|sped\s+up|slowed|nightcore|version|prod\.)\b/i;
+
+export function isLikelyMusicTrack(
+  title: string,
+  rawChannel: string,
+  badgesRaw: unknown,
+  durationSec: number | null,
+  likedIds?: Set<string>,
+  videoId?: string,
+): boolean {
+  if (videoId && likedIds?.has(videoId)) return true;
+  if (durationSec !== null && (durationSec < 45 || durationSec > 660)) return false;
+  if (NON_MUSIC_RE.test(title)) return false;
+
+  if (/\s*-\s*Topic$/i.test(rawChannel) || /vevo$/i.test(rawChannel.trim())) return true;
+  if (badgesRaw && /OFFICIAL_ARTIST_BADGE|MUSIC_NOTE|AUDIO_BADGE/i.test(JSON.stringify(badgesRaw))) return true;
+  if (MUSIC_HINT_RE.test(title)) return true;
+  if (/\b(music|records|recordings|official\s+audio|sounds)\b/i.test(rawChannel)) return true;
+  return false;
+}
+
+function extractTracks(root: unknown, options?: { musicOnly?: boolean; likedIds?: Set<string> }): Track[] {
   const seen = new Set<string>();
   const out: Track[] = [];
-  const push = (videoId: string, title: string, artist: string, artistId: string | null, durationSec: number | null, thumbnail: string | null) => {
+  const musicOnly = options?.musicOnly ?? false;
+  const likedIds = options?.likedIds;
+
+  const push = (
+    videoId: string,
+    title: string,
+    rawArtist: string,
+    artistId: string | null,
+    durationSec: number | null,
+    thumbnail: string | null,
+    badges?: unknown,
+  ) => {
     if (!videoId || seen.has(videoId) || !title) return;
+    if (musicOnly && !isLikelyMusicTrack(title, rawArtist, badges, durationSec, likedIds, videoId)) return;
     seen.add(videoId);
+    const artist = rawArtist.replace(/\s*-\s*Topic$/i, '');
     const artists: ArtistRef[] = artist ? [{ name: artist, id: artistId }] : [];
     out.push({
       videoId,
@@ -177,11 +217,11 @@ function extractTracks(root: unknown): Track[] {
       const videoId = typeof r.videoId === 'string' ? r.videoId : '';
       const title = textOf(r.title ?? r.headline);
       const byline = (r.shortBylineText ?? r.longBylineText ?? r.ownerText) as { runs?: Array<{ text?: string; navigationEndpoint?: { browseEndpoint?: { browseId?: string } } }> } | undefined;
-      const artist = textOf(byline).replace(/\s*-\s*Topic$/, '');
+      const rawArtist = textOf(byline);
       const artistId = byline?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId ?? null;
       const dur = parseDurationSec(r.lengthText);
       const thumb = bestThumb(r.thumbnail);
-      push(videoId, title, artist, artistId, dur, thumb);
+      push(videoId, title, rawArtist, artistId, dur, thumb, r.ownerBadges);
     }
   }
 
@@ -192,10 +232,10 @@ function extractTracks(root: unknown): Track[] {
     const meta = r.metadata as { lockupMetadataViewModel?: { title?: unknown; metadata?: { contentMetadataViewModel?: { metadataRows?: Array<{ metadataParts?: Array<{ text?: unknown }> }> } } } } | undefined;
     const title = textOf(meta?.lockupMetadataViewModel?.title);
     const rows = meta?.lockupMetadataViewModel?.metadata?.contentMetadataViewModel?.metadataRows ?? [];
-    const artist = textOf(rows[0]?.metadataParts?.[0]?.text).replace(/\s*-\s*Topic$/, '');
+    const rawArtist = textOf(rows[0]?.metadataParts?.[0]?.text);
     const imgWrap = r.contentImage as { thumbnailViewModel?: { image?: unknown } } | undefined;
     const thumb = bestThumb(imgWrap?.thumbnailViewModel?.image);
-    push(contentId, title, artist, null, null, thumb);
+    push(contentId, title, rawArtist, null, null, thumb, meta);
   }
 
   for (const r of collect(root, 'tileRenderer')) {
@@ -203,9 +243,9 @@ function extractTracks(root: unknown): Track[] {
     if (!videoId) continue;
     const meta = r.metadata as { tileMetadataRenderer?: { title?: unknown; lines?: Array<{ lineRenderer?: { items?: Array<{ lineItemRenderer?: { text?: unknown } }> } }> } } | undefined;
     const title = textOf(meta?.tileMetadataRenderer?.title);
-    const artist = textOf(meta?.tileMetadataRenderer?.lines?.[0]?.lineRenderer?.items?.[0]?.lineItemRenderer?.text).replace(/\s*-\s*Topic$/, '');
+    const rawArtist = textOf(meta?.tileMetadataRenderer?.lines?.[0]?.lineRenderer?.items?.[0]?.lineItemRenderer?.text);
     const thumb = bestThumb((r.header as { tileHeaderRenderer?: { thumbnail?: unknown } } | undefined)?.tileHeaderRenderer?.thumbnail);
-    push(videoId, title, artist, null, null, thumb);
+    push(videoId, title, rawArtist, null, null, thumb, meta);
   }
 
   return out;
@@ -307,11 +347,27 @@ export async function fetchOAuthLibrary(section: LibrarySection, title: string):
       }));
     }
 
-    case 'recent':
+    case 'recent': {
+      const local = loadLocalRecentTracks();
+      const musicHist = await executeBrowse(yt, { browseId: 'FEmusic_history' }).catch(() => null);
+      if (musicHist) {
+        const ytMusicTracks = extractTracks(musicHist);
+        if (ytMusicTracks.length > 0) {
+          return {
+            data: { title, shelves: [], grid: [], tracks: mergeRecentTracks(local, ytMusicTracks, 50) },
+            next: null,
+          };
+        }
+      }
+
+      const likedData = await executeBrowse(yt, { browseId: 'VLLM' }).catch(() => null);
+      const likedIds = new Set(likedData ? extractTracks(likedData).map((t) => t.videoId) : []);
+
       return pagedBrowse(yt, title, { browseId: 'FEhistory' }, (data) => ({
         grid: [],
-        tracks: extractTracks(data),
+        tracks: mergeRecentTracks(local, extractTracks(data, { musicOnly: true, likedIds }), 50),
       }));
+    }
 
     case 'artists':
       return pagedBrowse(yt, title, { browseId: 'FEchannels' }, (data) => ({
@@ -326,18 +382,161 @@ export async function fetchOAuthLibrary(section: LibrarySection, title: string):
       }));
 
     case 'made-for-you': {
-      // Public YouTube Music home mixes work cleanly via anonymous InnerTube without 400.
+      // Personalized playlists + public mixes when signed in via OAuth2.
+      const playlists = await fetchOAuthLibrary('playlists', title).catch(() => null);
       const anon = await getInnertube();
       const home = await anon.music.getHomeFeed();
-      const { mapHome } = await import('./mappers');
       const shelves = mapHome(home);
-      const grid = shelves.flatMap((s) => s.items).filter((i) => i.kind === 'playlist' || i.kind === 'album');
+      const mixes = shelves.flatMap((s) => s.items).filter((i) => i.kind === 'playlist' || i.kind === 'album');
+      const seen = new Set<string>();
+      const grid: MusicItem[] = [];
+      for (const item of [...(playlists?.data.grid ?? []), ...mixes]) {
+        if (!item.id || seen.has(item.id)) continue;
+        seen.add(item.id);
+        grid.push(item);
+      }
       return {
         data: { title, shelves: [], grid, tracks: [] },
         next: null,
       };
     }
   }
+}
+
+function trackToMusicItem(track: Track): MusicItem {
+  return {
+    kind: 'song',
+    id: track.videoId,
+    title: track.title,
+    subtitle: track.artists.map((a) => a.name).filter(Boolean).join(', '),
+    artists: track.artists,
+    album: track.album,
+    thumbnail: track.thumbnail,
+    wide: false,
+    durationSec: track.durationSec,
+    explicit: track.explicit,
+  };
+}
+
+function uniqueTrackItems(tracks: Track[], limit: number, excludeIds?: Set<string>): MusicItem[] {
+  const seen = new Set<string>(excludeIds);
+  const items: MusicItem[] = [];
+  for (const track of tracks) {
+    if (!track.videoId || seen.has(track.videoId)) continue;
+    seen.add(track.videoId);
+    items.push(trackToMusicItem(track));
+    if (items.length >= limit) break;
+  }
+  return items;
+}
+
+/**
+ * Builds a personalized Home feed for OAuth2 sessions from the account's own
+ * music history, Liked Music (`VLLM`), user playlists, and YouTube Music Up Next
+ * radio recommendations, followed by public discovery shelves.
+ */
+export async function fetchOAuthHome(
+  getRadioTracks: (videoId: string) => Promise<Track[]>,
+): Promise<PagedResult<Shelf[]>> {
+  const anon = await getInnertube();
+  const [recentPage, likedPage, playlistsPage, anonFeed] = await Promise.all([
+    fetchOAuthLibrary('recent', 'Recently Played').catch(() => null),
+    fetchOAuthPlaylist(LIKED_MUSIC_PLAYLIST).catch(() => null),
+    fetchOAuthLibrary('playlists', 'Your playlists').catch(() => null),
+    anon.music.getHomeFeed().catch(() => null),
+  ]);
+
+  const recentTracks = recentPage?.data.tracks ?? [];
+  const likedTracks = likedPage?.page.tracks ?? [];
+  const seedPool = [...recentTracks, ...likedTracks];
+  const seed1 = seedPool[0] ?? null;
+  const seed1Artist = seed1?.artists[0]?.name.toLowerCase();
+  const seed2 =
+    seedPool.find(
+      (t) =>
+        t.videoId !== seed1?.videoId &&
+        (!seed1Artist || t.artists[0]?.name.toLowerCase() !== seed1Artist),
+    ) ?? seedPool.find((t) => t.videoId !== seed1?.videoId) ?? null;
+
+  const [radio1, radio2] = await Promise.all([
+    seed1 ? getRadioTracks(seed1.videoId).catch(() => []) : Promise.resolve([]),
+    seed2 ? getRadioTracks(seed2.videoId).catch(() => []) : Promise.resolve([]),
+  ]);
+
+  const shelves: Shelf[] = [];
+  const usedIds = new Set<string>();
+
+  const quickPickItems = uniqueTrackItems([...radio1, ...likedTracks.slice(0, 6)], 16);
+  if (quickPickItems.length > 0) {
+    for (const item of quickPickItems) usedIds.add(item.id);
+    shelves.push({
+      title: 'Quick picks',
+      strapline: 'Start radio from your listening',
+      layout: 'tracks',
+      items: quickPickItems,
+      seeAll: null,
+    });
+  }
+
+  const playlists = (playlistsPage?.data.grid ?? []).filter(
+    (p) => p.kind === 'playlist' && (p.thumbnail !== null || p.id !== `VL${LIKED_MUSIC_PLAYLIST}`),
+  );
+  if (playlists.length > 0) {
+    shelves.push({
+      title: 'Your playlists',
+      strapline: 'From your library',
+      layout: 'square',
+      items: playlists.slice(0, 12),
+      seeAll: null,
+    });
+  }
+
+  if (seed2 && radio2.length > 0) {
+    const recItems = uniqueTrackItems(radio2, 12, usedIds);
+    if (recItems.length > 0) {
+      for (const item of recItems) usedIds.add(item.id);
+      const who = seed2.artists[0]?.name || seed2.title;
+      shelves.push({
+        title: `Recommended · ${who}`,
+        strapline: 'Because you listen to this',
+        layout: 'tracks',
+        items: recItems,
+        seeAll: null,
+      });
+    }
+  }
+
+  if (likedTracks.length > 0) {
+    const likedItems = uniqueTrackItems(likedTracks, 12);
+    if (likedItems.length > 0) {
+      shelves.push({
+        title: 'Your Liked Music',
+        strapline: 'Saved songs',
+        layout: 'tracks',
+        items: likedItems,
+        seeAll: { browseId: `VL${LIKED_MUSIC_PLAYLIST}`, params: null },
+      });
+    }
+  }
+
+  const discoveryShelves = anonFeed
+    ? mapHome(anonFeed).filter((s) => !/^(quick picks|listen again|recently played)$/i.test(s.title.trim()))
+    : [];
+  shelves.push(...discoveryShelves);
+
+  const wrapNext = (feed: typeof anonFeed): PagedResult<Shelf[]>['next'] =>
+    feed?.has_continuation
+      ? () =>
+          feed
+            .getContinuation()
+            .then((nextFeed) => ({ data: mapHome(nextFeed), next: wrapNext(nextFeed) }))
+            .catch(() => ({ data: [], next: null }))
+      : null;
+
+  return {
+    data: shelves,
+    next: wrapNext(anonFeed),
+  };
 }
 
 export async function fetchOAuthPlaylist(id: string): Promise<{ page: PlaylistPage; more: PagedResult<Track[]>['next'] }> {

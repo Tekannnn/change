@@ -4,7 +4,7 @@ import { getInnertube, getMusicClient, getSignedInnertube } from '@/playback/you
 import { loadStoredYtOAuth } from '@/extension/ytOAuthStorage';
 import { isExactArtistMatch, normalizedArtistName } from '@/lib/artistCredits';
 import { LIBRARY_SECTIONS, LIKED_MUSIC_PLAYLIST, type LibrarySection } from './library';
-import { fetchOAuthLibrary, fetchOAuthPlaylist } from './oauthLibrary';
+import { fetchOAuthHome, fetchOAuthLibrary, fetchOAuthPlaylist } from './oauthLibrary';
 import {
   mapAlbum,
   mapArtist,
@@ -63,6 +63,9 @@ function homePage(feed: YTMusic.HomeFeed): Paged<Shelf[]> {
 }
 
 export async function fetchHome(): Promise<Paged<Shelf[]>> {
+  if (loadStoredYtOAuth()) {
+    return fetchOAuthHome(async (videoId) => (await fetchRadio(videoId)).candidates.map((c) => c.track));
+  }
   const yt = await getMusicClient();
   return homePage(await yt.music.getHomeFeed());
 }

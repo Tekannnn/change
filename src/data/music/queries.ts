@@ -54,9 +54,9 @@ export const browseQuery = (link: BrowseLink) =>
   queryOptions({ queryKey: ['music', 'browse', link.browseId, link.params], queryFn: () => fetchBrowse(link), staleTime: STALE });
 
 type HomePageParam = (() => Promise<Paged<Shelf[]>>) | null;
-export const homeQuery = () =>
+export const homeQuery = (signedIn = false) =>
   infiniteQueryOptions({
-    queryKey: ['music', 'home'],
+    queryKey: ['music', 'home', signedIn ? 'signed-in' : 'anonymous'],
     queryFn: ({ pageParam }: { pageParam: HomePageParam }) => (pageParam ? pageParam() : fetchHome()),
     initialPageParam: null as HomePageParam,
     getNextPageParam: (last) => last.next ?? undefined,
@@ -120,7 +120,8 @@ export function useBrowse(link: BrowseLink) {
 }
 export function useHome() {
   const { ready } = useYouTubeReady();
-  return useInfiniteQuery({ ...homeQuery(), enabled: ready });
+  const signedIn = useSignedIn();
+  return useInfiniteQuery({ ...homeQuery(signedIn), enabled: ready });
 }
 export function usePlaylist(id: string) {
   const { ready } = useYouTubeReady();
@@ -150,7 +151,7 @@ export function prefetchPageData(pathname: string): void {
   if (!detected?.info.capabilities.includes('yt')) return;
   const [, kind, id] = pathname.split('/');
   if (!id) {
-    if (kind === 'home') void queryClient.prefetchInfiniteQuery(homeQuery());
+    if (kind === 'home') void queryClient.prefetchInfiniteQuery(homeQuery(ytAuthSnapshot().signedIn));
     if (kind === 'new') void queryClient.prefetchQuery(exploreQuery());
     return;
   }
