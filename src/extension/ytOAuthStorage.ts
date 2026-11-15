@@ -16,11 +16,13 @@ export interface StoredYtOAuthSession {
   account: StoredYtAccount;
 }
 
-const OAUTH_STORAGE_KEY = 'unknwser:yt_oauth';
+const OAUTH_STORAGE_KEY = 'audiophile:yt_oauth';
+const LEGACY_OAUTH_STORAGE_KEY = 'unknwser:yt_oauth';
 
 export function loadStoredYtOAuth(): StoredYtOAuthSession | null {
   try {
-    const raw = localStorage.getItem(OAUTH_STORAGE_KEY);
+    const raw =
+      localStorage.getItem(OAUTH_STORAGE_KEY) ?? localStorage.getItem(LEGACY_OAUTH_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredYtOAuthSession>;
     if (!parsed?.tokens?.access_token || !parsed.tokens.refresh_token || !parsed.tokens.expiry_date || !parsed.account) {
@@ -49,6 +51,7 @@ export function updateStoredYtOAuthTokens(tokens: StoredOAuthTokens): void {
 export function clearStoredYtOAuth(): void {
   try {
     localStorage.removeItem(OAUTH_STORAGE_KEY);
+    localStorage.removeItem(LEGACY_OAUTH_STORAGE_KEY);
   } catch {
     // Ignore.
   }

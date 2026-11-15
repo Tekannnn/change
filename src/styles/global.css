@@ -43,6 +43,10 @@
   --animate-fade-in: fade-in 0.4s ease;
   --animate-enter: enter 0.3s var(--ease-out-panel);
   --animate-morph: morph 0.32s var(--ease-out-panel);
+  --animate-owner-backdrop-in: owner-backdrop-in 0.28s var(--ease-out-panel) forwards;
+  --animate-owner-backdrop-out: owner-backdrop-out 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
+  --animate-owner-card-in: owner-card-in 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-owner-card-out: owner-card-out 0.24s cubic-bezier(0.4, 0, 0.8, 0.6) forwards;
   --animate-spin: spin 1s linear infinite;
   --animate-shimmer: shimmer 1.6s ease-in-out infinite;
   --animate-matching: matching 1.4s ease-in-out infinite alternate;
@@ -85,6 +89,46 @@
       opacity: 0;
       filter: blur(5px);
       transform: scale(0.74);
+    }
+  }
+  @keyframes owner-backdrop-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes owner-backdrop-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes owner-card-in {
+    0% {
+      opacity: 0;
+      filter: blur(8px);
+      transform: translateY(14px) scale(0.88);
+    }
+    100% {
+      opacity: 1;
+      filter: blur(0px);
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes owner-card-out {
+    0% {
+      opacity: 1;
+      filter: blur(0px);
+      transform: translateY(0) scale(1);
+    }
+    100% {
+      opacity: 0;
+      filter: blur(6px);
+      transform: translateY(-8px) scale(0.88);
     }
   }
   @keyframes spin {

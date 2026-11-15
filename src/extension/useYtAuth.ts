@@ -125,7 +125,7 @@ export function useRefreshYtAuth() {
   return useMutation({ mutationFn: () => readAuth(true) });
 }
 
-/** Connect or disconnect Unknwser from the user's YouTube session. */
+/** Connect or disconnect Audiophile from the user's YouTube session. */
 export function useSetConnected() {
   return useMutation({
     mutationFn: async (connected: boolean) => {

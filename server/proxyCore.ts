@@ -70,6 +70,14 @@ function resolveYouTubeClientHeaders(clientNameRaw?: string | null, hostname?: s
         isWeb: true,
         origin: hostOrigin,
       };
+    case 'TV':
+    case 'TVHTML5':
+      return {
+        ua: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
+        isWeb: true,
+        origin: hostOrigin,
+      };
+    case 'WEB':
     case 'WEB_REMIX':
     default:
       return { ua: CHROME_UA, isWeb: true, origin: hostOrigin };

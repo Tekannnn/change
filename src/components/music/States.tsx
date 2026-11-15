@@ -12,9 +12,9 @@ export const stateStyles = {
 export function NeedsExtension({ what = 'YouTube Music' }: { what?: string }) {
   return (
     <div className={stateStyles.state}>
-      <p className={stateStyles.title}>Browse {what} on Unknwser</p>
+      <p className={stateStyles.title}>Browse {what} on Audiophile</p>
       <p className={stateStyles.detail}>
-        Connecting to YouTube Music via the Unknwser proxy. Please reload if this takes a moment.
+        Connecting to YouTube Music via the Audiophile proxy. Please reload if this takes a moment.
       </p>
       <PrefetchLink to="/home" className={stateStyles.button}>
         Reload Home

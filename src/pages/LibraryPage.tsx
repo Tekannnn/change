@@ -47,7 +47,7 @@ export default function LibraryPage() {
         <PageHeader title={title} />
         <EmptyState
           title="Sign in to see your library"
-          detail="Sign in to YouTube Music in Settings to sync your playlists, liked songs, and library into Unknwser."
+          detail="Sign in to YouTube Music in Settings to sync your playlists, liked songs, and library into Audiophile."
         />
       </>
     );

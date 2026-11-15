@@ -114,8 +114,8 @@ export function Sidebar() {
         aria-label="Main"
       >
         <div className="mt-2 ml-2 flex h-18 items-center px-5">
-          <PrefetchLink to="/home" className="inline-flex items-center rounded-[6px]" aria-label="Unknwser, Home" onClick={close}>
-            <span className="type-[700_19px/24px] tracking-[-0.01em] text-primary">Unknwser</span>
+          <PrefetchLink to="/home" className="inline-flex items-center rounded-[6px]" aria-label="Audiophile, Home" onClick={close}>
+            <span className="type-[700_19px/24px] tracking-[-0.01em] text-primary">Audiophile</span>
           </PrefetchLink>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto pr-3 pl-5 [scrollbar-width:none]">

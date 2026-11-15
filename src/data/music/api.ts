@@ -1,8 +1,10 @@
 import type { YTMusic, YTNodes } from 'youtubei.js/web';
 import type { Candidate } from '@/playback/queue/builder';
 import { getInnertube, getMusicClient, getSignedInnertube } from '@/playback/youtube/innertube';
+import { loadStoredYtOAuth } from '@/extension/ytOAuthStorage';
 import { isExactArtistMatch, normalizedArtistName } from '@/lib/artistCredits';
 import { LIBRARY_SECTIONS, LIKED_MUSIC_PLAYLIST, type LibrarySection } from './library';
+import { fetchOAuthLibrary, fetchOAuthPlaylist } from './oauthLibrary';
 import {
   mapAlbum,
   mapArtist,
@@ -133,6 +135,15 @@ function playlistTracks(page: YTMusic.Playlist): Paged<Track[]> {
 
 /** The header and first page of tracks; `more` fetches the rest page by page. */
 export async function fetchPlaylist(id: string): Promise<{ page: PlaylistPage; more: Paged<Track[]>['next'] }> {
+  if (loadStoredYtOAuth()) {
+    try {
+      const yt = await getInnertube();
+      const playlist = await yt.music.getPlaylist(id);
+      return { page: mapPlaylist(id, playlist), more: playlistTracks(playlist).next };
+    } catch {
+      return fetchOAuthPlaylist(id);
+    }
+  }
   const yt = await getMusicClient();
   const playlist = await yt.music.getPlaylist(id);
   return { page: mapPlaylist(id, playlist), more: playlistTracks(playlist).next };
@@ -182,9 +193,12 @@ function runsText(node: unknown): string {
 
 /** One library page, a page of it at a time: grids continue as grids, song lists as song lists. */
 export async function fetchLibrary(section: LibrarySection): Promise<Paged<BrowsePage>> {
+  const { title, browseId } = LIBRARY_SECTIONS[section];
+  if (loadStoredYtOAuth()) {
+    return fetchOAuthLibrary(section, title);
+  }
   const yt = await getSignedInnertube();
   const { YTNodes } = await import('youtubei.js/web');
-  const { title, browseId } = LIBRARY_SECTIONS[section];
   const response = await yt.actions.execute('/browse', { browseId, client: 'YTMUSIC', parse: true });
   const memo = response.contents_memo;
   const grids = memo?.getType(YTNodes.Grid) ?? [];
@@ -221,27 +235,41 @@ export async function fetchLibraryPlaylists(): Promise<MusicItem[]> {
   return data.grid.filter((item) => item.kind === 'playlist');
 }
 
+async function executeSigned(endpoint: string, payload: Record<string, unknown>) {
+  const yt = await getSignedInnertube();
+  if (!loadStoredYtOAuth()) {
+    return yt.actions.execute(endpoint, { ...payload, client: 'YTMUSIC' });
+  }
+  try {
+    return await yt.actions.execute(endpoint, { ...payload, client: 'WEB' });
+  } catch {
+    return await yt.actions.execute(endpoint, { ...payload, client: 'TV' });
+  }
+}
+
 export type LikeStatus = 'LIKE' | 'DISLIKE' | 'INDIFFERENT';
 
 /** The thumbs state YouTube Music shows on its player for this track. */
 export async function fetchLikeStatus(videoId: string): Promise<LikeStatus> {
-  const yt = await getSignedInnertube();
-  const response = await yt.actions.execute('/next', { videoId, client: 'YTMUSIC' });
-  const button = collect((response.data as Raw).playerOverlays, 'likeButtonRenderer')[0];
-  const status = button?.likeStatus;
-  return status === 'LIKE' || status === 'DISLIKE' ? status : 'INDIFFERENT';
+  try {
+    const response = await executeSigned('/next', { videoId });
+    const button = collect((response.data as Raw).playerOverlays, 'likeButtonRenderer')[0];
+    const status = button?.likeStatus;
+    return status === 'LIKE' || status === 'DISLIKE' ? status : 'INDIFFERENT';
+  } catch (err) {
+    if (loadStoredYtOAuth()) return 'INDIFFERENT';
+    throw err;
+  }
 }
 
 /** Likes a track (it joins Liked Music) or takes the like back. */
 export async function setTrackLiked(videoId: string, liked: boolean): Promise<void> {
-  const yt = await getSignedInnertube();
-  await yt.actions.execute(liked ? '/like/like' : '/like/removelike', { target: { videoId }, client: 'YTMUSIC' });
+  await executeSigned(liked ? '/like/like' : '/like/removelike', { target: { videoId } });
 }
 
 /** Adds an album or playlist to the library, or removes it: YouTube saves both by liking the list. */
 export async function setListSaved(playlistId: string, saved: boolean): Promise<void> {
-  const yt = await getSignedInnertube();
-  await yt.actions.execute(saved ? '/like/like' : '/like/removelike', { target: { playlistId }, client: 'YTMUSIC' });
+  await executeSigned(saved ? '/like/like' : '/like/removelike', { target: { playlistId } });
 }
 
 export interface PlaylistOption {
@@ -256,8 +284,7 @@ export interface PlaylistOption {
  * like, which Favorite already does, so it's left out.
  */
 export async function fetchPlaylistOptions(videoId: string): Promise<PlaylistOption[]> {
-  const yt = await getSignedInnertube();
-  const response = await yt.actions.execute('/playlist/get_add_to_playlist', { videoIds: [videoId], client: 'YTMUSIC' });
+  const response = await executeSigned('/playlist/get_add_to_playlist', { videoIds: [videoId] });
   return collect(response.data, 'playlistAddToOptionRenderer')
     .map((option) => ({
       playlistId: typeof option.playlistId === 'string' ? option.playlistId : '',
@@ -267,11 +294,9 @@ export async function fetchPlaylistOptions(videoId: string): Promise<PlaylistOpt
 }
 
 export async function addToPlaylist(playlistId: string, videoId: string): Promise<void> {
-  const yt = await getSignedInnertube();
-  await yt.actions.execute('/browse/edit_playlist', {
+  await executeSigned('/browse/edit_playlist', {
     playlistId: playlistId.replace(/^VL/, ''),
     actions: [{ action: 'ACTION_ADD_VIDEO', addedVideoId: videoId, dedupeOption: 'DEDUPE_OPTION_SKIP' }],
-    client: 'YTMUSIC',
   });
 }
 
@@ -280,13 +305,11 @@ export async function addToPlaylist(playlistId: string, videoId: string): Promis
  * makes one (InnerTube `playlist/create`). Returns its id, without the VL.
  */
 export async function createPlaylist(title: string, videoIds: string[], description = ''): Promise<string> {
-  const yt = await getSignedInnertube();
-  const response = await yt.actions.execute('/playlist/create', {
+  const response = await executeSigned('/playlist/create', {
     title,
     description,
     privacyStatus: 'PRIVATE',
     videoIds,
-    client: 'YTMUSIC',
   });
   const id = (response.data as { playlistId?: string } | undefined)?.playlistId;
   if (!id) throw new Error('YouTube Music did not make the playlist');

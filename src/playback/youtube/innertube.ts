@@ -57,13 +57,12 @@ export function getSignedInnertube(): Promise<Innertube> {
   return signedInstance;
 }
 
-/** The instance browse requests should use: signed in when the user is, anonymous otherwise. */
+/** The instance browse requests should use: signed extension when active, anonymous otherwise (OAuth2 uses getSignedInnertube only for personal library calls). */
 export async function getMusicClient(): Promise<Innertube> {
   const auth = await ensureYtAuth().catch(() => null);
-  // A failed auth read browses anonymously, and says so, so the answer that
-  // does come later reloads what was read meanwhile (useYtAuth.adopt).
   noteMusicIdentity(auth ? identityOf(auth) : 'anonymous');
-  return auth?.signedIn ? getSignedInnertube() : getInnertube();
+  const hasOAuth = loadStoredYtOAuth() !== null;
+  return auth?.signedIn && !hasOAuth ? getSignedInnertube() : getInnertube();
 }
 
 const YOUTUBE_HOSTS = new Set(['music.youtube.com', 'www.youtube.com', 'youtube.com']);
@@ -140,10 +139,16 @@ async function signedFetch(input: RequestInfo | URL, init?: RequestInit): Promis
     { ...(init?.signal && { signal: init.signal }) },
   );
   const payload = response.bodyEncoding === 'base64' ? decodeBase64(response.body) : response.body;
-  return new Response(response.status === 204 || response.status === 304 ? null : payload, {
+  const res = new Response(response.status === 204 || response.status === 304 ? null : payload, {
     status: response.status,
     headers: response.headers,
   });
+  try {
+    Object.defineProperty(res, 'url', { value: response.url || url.toString() });
+  } catch {
+    // Ignore read-only url property fallback.
+  }
+  return res;
 }
 
 async function isFirstRun(): Promise<boolean> {

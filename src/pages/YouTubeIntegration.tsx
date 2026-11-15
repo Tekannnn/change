@@ -172,9 +172,7 @@ export function YouTubeIntegration() {
                 </div>
               ) : (
                 <>
-                  <p className="type-body text-secondary">
-                    Sign in with your Google account to sync your playlists, liked songs, and YouTube Music library:
-                  </p>
+                  <p className="type-body-emphasized text-primary">Copy This Code</p>
                   <div className="flex items-center justify-between gap-3 rounded-[12px] bg-quinary px-4 py-3">
                     <span className="font-mono text-[20px] font-bold tracking-[0.14em] text-primary select-all">
                       {pending.userCode}
@@ -197,10 +195,6 @@ export function YouTubeIntegration() {
                     <span>Continue with Google Sign-In</span>
                     <ExternalLink size={15} />
                   </a>
-                  <p className="flex items-center justify-center gap-2 type-callout text-secondary">
-                    <Loader2 size={13} className="animate-spin" />
-                    <span>Enter the code on Google, then come back here…</span>
-                  </p>
                 </>
               )}
             </div>
