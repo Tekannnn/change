@@ -47,7 +47,7 @@ export default function LibraryPage() {
         <PageHeader title={title} />
         <EmptyState
           title="Sign in to see your library"
-          detail="Bitrate uses the YouTube Music account this browser is signed in to. Sign in on music.youtube.com, then come back."
+          detail="Sign in to YouTube Music in Settings to sync your playlists, liked songs, and library into Unknwser."
         />
       </>
     );

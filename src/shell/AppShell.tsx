@@ -6,6 +6,7 @@ import { Outlet } from 'react-router';
 import { useUi } from '@/state/ui';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
 import { MobileTopBar } from './MobileTopBar';
+import { OwnerCreditPopup } from './OwnerCreditPopup';
 import { PlayerBar } from './PlayerBar';
 import { SidePanel } from './SidePanel';
 import { Sidebar } from './Sidebar';
@@ -52,6 +53,7 @@ export function AppShell() {
           <FullScreenPlayer />
         </Suspense>
       )}
+      <OwnerCreditPopup />
     </div>
   );
 }

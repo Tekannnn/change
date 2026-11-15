@@ -130,6 +130,13 @@ function applyTargetHostHeaders(target: URL, headers: Record<string, string>, bo
     }
   }
 
+  if ((host === 'www.youtube.com' || host === 'youtube.com') && target.pathname === '/tv') {
+    headers['User-Agent'] = 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version';
+    headers['Referer'] = 'https://www.youtube.com/tv';
+    deleteHeadersCI(headers, ['Origin', 'X-Origin']);
+    return;
+  }
+
   if (host === 'music.youtube.com') {
     headers['Origin'] = 'https://music.youtube.com';
     headers['Referer'] = 'https://music.youtube.com/';
@@ -198,6 +205,8 @@ export async function onRequest(context: { request: Request }): Promise<Response
       };
       const contentType = request.headers.get('content-type');
       if (contentType) headers['Content-Type'] = contentType;
+      const authorization = request.headers.get('authorization');
+      if (authorization) headers['Authorization'] = authorization;
       applyTargetHostHeaders(target, headers, bodyText);
 
       const upstream = await fetch(target.toString(), {

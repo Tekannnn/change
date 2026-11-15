@@ -1,6 +1,7 @@
 import type { Innertube, Types } from 'youtubei.js/web';
 import { getBridge } from '@/extension/bridge';
 import { ensureYtAuth, identityOf, noteMusicIdentity } from '@/extension/useYtAuth';
+import { loadStoredYtOAuth, updateStoredYtOAuthTokens, type StoredOAuthTokens } from '@/extension/ytOAuthStorage';
 import { trackLog } from '../trackLog';
 
 /**
@@ -28,11 +29,23 @@ export function getInnertube(): Promise<Innertube> {
  */
 let signedInstance: Promise<Innertube> | null = null;
 
+export function resetSignedInnertube(): void {
+  signedInstance = null;
+}
+
 export function getSignedInnertube(): Promise<Innertube> {
   signedInstance ??= create(signedFetch).then(
     (yt) => {
-      // Lifts YouTube.js's "must be signed in" checks (library pages). With
-      // no cookie and no OAuth token it adds no credentials of its own.
+      const oauth = loadStoredYtOAuth();
+      if (oauth) {
+        yt.session.oauth.setTokens(oauth.tokens);
+        yt.session.on('update-credentials', (data: { credentials?: StoredOAuthTokens }) => {
+          if (data.credentials) updateStoredYtOAuthTokens(data.credentials);
+        });
+      }
+      // Lifts YouTube.js's "must be signed in" checks (library pages). When
+      // using OAuth2, HTTPClient attaches Authorization: Bearer automatically;
+      // when using the browser extension, yt.fetch supplies browser cookies.
       yt.session.logged_in = true;
       return yt;
     },
@@ -56,17 +69,16 @@ export async function getMusicClient(): Promise<Innertube> {
 const YOUTUBE_HOSTS = new Set(['music.youtube.com', 'www.youtube.com', 'youtube.com']);
 
 /** Headers a page may send without triggering a CORS preflight. */
-const SAFELISTED = new Set(['accept', 'accept-language', 'content-language']);
+const SAFELISTED = new Set(['accept', 'accept-language', 'content-language', 'authorization']);
 
 /**
  * youtubei answers CORS preflights with 400 (measured; web/fixtures/README.md),
  * so InnerTube calls must be "simple" requests: a text/plain body and no
- * custom headers. youtubei parses the JSON body regardless of the declared
- * type, and everything the dropped headers carried (client name and version,
- * visitor data) is also in the body's `context.client`. Origin, Referer and
- * X-Origin are added by the extension's rule.
+ * custom headers. Non-Innertube calls (such as OAuth2 endpoints) go through our
+ * same-origin `/api/proxy` without CORS preflight, so their JSON Content-Type
+ * can be preserved as-is.
  */
-async function simpleRequestFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export async function simpleRequestFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const request = input instanceof Request ? input : null;
   const url = new URL(request ? request.url : input.toString());
 
@@ -85,7 +97,10 @@ async function simpleRequestFetch(input: RequestInfo | URL, init?: RequestInit):
   if (body === undefined && request && method !== 'GET' && method !== 'HEAD') {
     body = await request.text();
   }
-  if (body != null) headers.set('Content-Type', 'text/plain;charset=UTF-8');
+  if (body != null) {
+    const contentType = !isInnertubeCall(url) ? source.get('content-type') : null;
+    headers.set('Content-Type', contentType || 'text/plain;charset=UTF-8');
+  }
 
   return fetch(`/api/proxy?url=${encodeURIComponent(url.toString())}`, {
     method,
@@ -111,7 +126,7 @@ async function signedFetch(input: RequestInfo | URL, init?: RequestInit): Promis
   if (!isInnertubeCall(url)) return simpleRequestFetch(input, init);
 
   const bridge = getBridge();
-  if (!bridge) throw new Error('Signed-in requests need the BitChord extension');
+  if (!bridge) throw new Error('Signed-in requests require a connected YouTube Music account');
   const method = (init?.method ?? request?.method ?? 'GET').toUpperCase() as 'GET' | 'POST';
   const headers: Record<string, string> = {};
   new Headers(init?.headers ?? request?.headers).forEach((value, key) => (headers[key] = value));

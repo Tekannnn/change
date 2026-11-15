@@ -1,54 +1,76 @@
-import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { Check, Copy, ExternalLink, Loader2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { SiYoutubemusic } from 'react-icons/si';
-import { useRefreshYtAuth, useSetConnected, useYtAuth } from '@/extension/useYtAuth';
+import { adoptYtAuth, useSetConnected, useYtAuth } from '@/extension/useYtAuth';
+import { startYtOAuthFlow, type OAuthPendingInfo } from '@/extension/ytOAuth';
 import { settingsUi } from './settingsStyles';
 
-function extractPlaylistId(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  try {
-    const url = new URL(trimmed);
-    const list = url.searchParams.get('list');
-    if (list) return list.trim();
-  } catch {
-    // Not a full URL; treat as a playlist ID if it looks like one.
-  }
-  const match = /[?&]list=([^&#\s]+)/.exec(trimmed);
-  if (match?.[1]) return match[1].trim();
-  return /^[A-Za-z0-9_-]{8,}$/.test(trimmed) ? trimmed : null;
-}
-
 /**
- * YouTube Music account row under Settings -> Account & Integrations.
- * Anonymous playback works immediately with no login required; by default this
- * shows "Not signed in" with a button for users who want to connect their account
- * or open their playlists.
+ * YouTube Music account integration under Settings -> Account & Integrations.
+ * Anonymous mode works by default ("Not signed in"). Pressing "Sign In" starts
+ * real Google OAuth2 sign-in so users can access all their YouTube Music
+ * library sections and personal playlists.
  */
 export function YouTubeIntegration() {
   const auth = useYtAuth();
   const setConnected = useSetConnected();
-  const refresh = useRefreshYtAuth();
-  const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
-  const [playlistInput, setPlaylistInput] = useState('');
-  const [playlistError, setPlaylistError] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [pending, setPending] = useState<OAuthPendingInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const isReady = auth.state === 'ready';
   const signedIn = isReady && auth.auth.signedIn;
   const browserSignedIn = isReady && auth.auth.browserSignedIn;
 
-  const handleOpenPlaylist = (e: FormEvent) => {
-    e.preventDefault();
-    const id = extractPlaylistId(playlistInput);
-    if (!id) {
-      setPlaylistError('Paste a valid YouTube or YouTube Music playlist URL or ID.');
-      return;
+  const stopFlow = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  };
+
+  useEffect(() => stopFlow, []);
+
+  const beginSignIn = () => {
+    stopFlow();
+    setPending(null);
+    setError(null);
+    setCopied(false);
+    setModalOpen(true);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    void startYtOAuthFlow((info) => setPending(info), controller.signal)
+      .then((nextState) => {
+        if (controller.signal.aborted) return;
+        setModalOpen(false);
+        setPending(null);
+        adoptYtAuth(nextState, { showCredit: true });
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        setError(err instanceof Error ? err.message : 'Unable to sign in to YouTube Music.');
+      });
+  };
+
+  const closeModal = () => {
+    stopFlow();
+    setModalOpen(false);
+    setPending(null);
+    setError(null);
+  };
+
+  const copyCode = async () => {
+    if (!pending?.userCode) return;
+    try {
+      await navigator.clipboard.writeText(pending.userCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard API unavailable; code stays clearly visible on screen.
     }
-    setPlaylistError(null);
-    setPlaylistInput('');
-    setOpen(false);
-    navigate(`/playlist/${encodeURIComponent(id)}`);
   };
 
   return (
@@ -91,64 +113,100 @@ export function YouTubeIntegration() {
           ) : (
             <>
               Not signed in
-              <button
-                type="button"
-                className={settingsUi.inlineButton}
-                onClick={() => setOpen((v) => !v)}
-              >
-                {open ? 'Close' : 'Sign In'}
+              <button type="button" className={settingsUi.inlineButton} onClick={beginSignIn}>
+                Sign In
               </button>
             </>
           )}
         </span>
       </div>
 
-      {open && !signedIn && (
-        <div className="relative flex flex-col gap-3 px-4 py-3 hairline-[16px]">
-          <p className="type-callout text-secondary">
-            Browsing, search, lyrics, and playback already work anonymously with no sign-in required. To play one of your
-            playlists directly, paste its link or ID below, or sign in on YouTube Music in a supported desktop browser.
-          </p>
-          <form onSubmit={handleOpenPlaylist} className="flex flex-wrap items-center gap-2">
-            <input
-              type="text"
-              value={playlistInput}
-              onChange={(e) => {
-                setPlaylistInput(e.target.value);
-                if (playlistError) setPlaylistError(null);
-              }}
-              placeholder="Playlist URL or ID (e.g. PL...)"
-              className="min-w-[200px] flex-1 rounded-[8px] border-0 bg-quaternary px-3 py-1.5 type-body text-primary placeholder:text-tertiary"
-              aria-label="YouTube Music playlist URL or ID"
-            />
-            <button
-              type="submit"
-              className="rounded-[12px] bg-key-bg px-3.5 py-1.5 type-callout-emphasized text-white"
+      {modalOpen &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-(--z-modal) grid animate-fade place-items-center bg-black/35 backdrop-blur-sm"
+            onPointerDown={(e) => e.target === e.currentTarget && closeModal()}
+          >
+            <div
+              className="glass-pill relative flex w-[min(410px,calc(100vw-32px))] animate-zoom flex-col gap-4 rounded-[18px] p-5"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Sign in to YouTube Music"
             >
-              Open Playlist
-            </button>
-          </form>
-          {playlistError && <p className="type-callout text-red">{playlistError}</p>}
-          <div className="flex flex-wrap items-center gap-2">
-            <a
-              href="https://music.youtube.com"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center rounded-[12px] bg-quaternary px-3 py-1.5 type-callout-emphasized text-primary"
-            >
-              Sign in on YouTube Music
-            </a>
-            <button
-              type="button"
-              className="inline-flex items-center rounded-[12px] bg-quaternary px-3 py-1.5 type-callout-emphasized text-primary disabled:opacity-50"
-              disabled={refresh.isPending}
-              onClick={() => void refresh.mutateAsync()}
-            >
-              {refresh.isPending ? 'Checking…' : 'Check Connection'}
-            </button>
-          </div>
-        </div>
-      )}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span
+                    className="grid size-7 place-items-center rounded-[7px] text-[#ff0033]"
+                    style={{ backgroundColor: '#ffffff' }}
+                    aria-hidden="true"
+                  >
+                    <SiYoutubemusic size={17} />
+                  </span>
+                  <h2 className="type-title-2-emphasized">Sign in to YouTube Music</h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  aria-label="Close"
+                  className="grid size-7 place-items-center rounded-full bg-quinary text-secondary hover:text-primary"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+
+              {error ? (
+                <div className="flex flex-col gap-3">
+                  <p className="type-body text-red">{error}</p>
+                  <button
+                    type="button"
+                    onClick={beginSignIn}
+                    className="inline-flex h-9 items-center justify-center rounded-[10px] bg-key-bg px-4 type-body-emphasized text-white"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              ) : !pending ? (
+                <div className="flex items-center gap-2.5 py-4 text-secondary type-body">
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>Preparing Google sign-in…</span>
+                </div>
+              ) : (
+                <>
+                  <p className="type-body text-secondary">
+                    Sign in with your Google account to sync your playlists, liked songs, and YouTube Music library:
+                  </p>
+                  <div className="flex items-center justify-between gap-3 rounded-[12px] bg-quinary px-4 py-3">
+                    <span className="font-mono text-[20px] font-bold tracking-[0.14em] text-primary select-all">
+                      {pending.userCode}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void copyCode()}
+                      className="inline-flex items-center gap-1.5 rounded-[8px] bg-quaternary px-2.5 py-1.5 type-callout-emphasized text-primary"
+                    >
+                      {copied ? <Check size={14} /> : <Copy size={14} />}
+                      <span>{copied ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <a
+                    href={pending.verificationUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-[10px] bg-key-bg px-4 type-body-emphasized text-white"
+                  >
+                    <span>Continue with Google Sign-In</span>
+                    <ExternalLink size={15} />
+                  </a>
+                  <p className="flex items-center justify-center gap-2 type-callout text-secondary">
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Enter the code on Google, then come back here…</span>
+                  </p>
+                </>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

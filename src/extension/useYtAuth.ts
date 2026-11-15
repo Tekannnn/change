@@ -2,19 +2,14 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import type { DetectedExtension, YtAuthState } from '@bitchord/shared/bridge';
 import { queryClient } from '@/lib/queryClient';
+import { useOwnerPopup } from '@/state/ownerPopup';
 import { extensionQueryKey, useExtension } from './useExtension';
-
-/**
- * Who YouTube requests act as (prompt §5.3). The extension owns the session;
- * this is the page's copy of the names and pictures it reports, kept current
- * three ways: a read on start, the extension's pushes (Bridge.subscribe), and
- * a re-read when the tab regains focus, for the pushes a sleeping worker
- * missed.
- */
+import { SIGNED_OUT_STATE, signOutYtOAuth, toYtAuthState } from './ytOAuth';
+import { loadStoredYtOAuth } from './ytOAuthStorage';
 
 export const ytAuthQueryKey = ['yt', 'auth'] as const;
 
-const SIGNED_OUT: YtAuthState = { browserSignedIn: false, connected: true, signedIn: false, accounts: [], active: null, problem: null };
+const SIGNED_OUT: YtAuthState = SIGNED_OUT_STATE;
 
 function detected(): DetectedExtension | null {
   return queryClient.getQueryData<DetectedExtension | null>(extensionQueryKey) ?? null;
@@ -26,7 +21,7 @@ function supportsAuth(extension: DetectedExtension | null): boolean {
 
 /** The current state, for code outside React (the music API, the player). */
 export function ytAuthSnapshot(): YtAuthState {
-  return queryClient.getQueryData<YtAuthState>(ytAuthQueryKey) ?? SIGNED_OUT;
+  return queryClient.getQueryData<YtAuthState>(ytAuthQueryKey) ?? toYtAuthState(loadStoredYtOAuth());
 }
 
 /** A key for "who is asking", which changes whenever the answers YouTube gives would. */
@@ -35,12 +30,6 @@ export function identityOf(state: YtAuthState): string {
 }
 
 let lastIdentity: string | null = null;
-/**
- * Who the cached ['music', …] queries were fetched as (getMusicClient notes
- * it). Not the same as the last state adopted: a browse request that ran
- * before the auth read came back (or after it failed) went out anonymous, and
- * that has to be noticed when the real identity arrives.
- */
 let musicIdentity: string | null = null;
 
 export function noteMusicIdentity(identity: string): void {
@@ -59,7 +48,8 @@ function resetMusic(): void {
  * channel switch), everything read as the old identity is dropped: the home
  * feed, the library, playlists, and the resolver's verdicts.
  */
-function adopt(state: YtAuthState): void {
+export function adoptYtAuth(state: YtAuthState, options?: { showCredit?: boolean }): void {
+  const prev = queryClient.getQueryData<YtAuthState>(ytAuthQueryKey);
   queryClient.setQueryData(ytAuthQueryKey, state);
   const identity = identityOf(state);
   if (lastIdentity !== null && identity !== lastIdentity) {
@@ -67,15 +57,22 @@ function adopt(state: YtAuthState): void {
     void import('@/playback/youtube/resolver').then((m) => m.onSessionChanged());
   }
   if (musicIdentity !== null && identity !== musicIdentity) resetMusic();
+  if (options?.showCredit && !prev?.signedIn && state.signedIn) {
+    useOwnerPopup.getState().show();
+  }
   lastIdentity = identity;
 }
 
 async function readAuth(refresh: boolean): Promise<YtAuthState> {
   const extension = detected();
-  if (!extension || !supportsAuth(extension)) return SIGNED_OUT;
-  const state = await extension.bridge.call('yt.authState', { refresh }, { timeoutMs: 20_000 });
-  adopt(state);
-  return state;
+  if (extension && supportsAuth(extension)) {
+    const state = await extension.bridge.call('yt.authState', { refresh }, { timeoutMs: 20_000 });
+    adoptYtAuth(state);
+    return state;
+  }
+  const oauthState = toYtAuthState(loadStoredYtOAuth());
+  adoptYtAuth(oauthState);
+  return oauthState;
 }
 
 /** Waits for the extension and the first auth read, so the first browse request already knows who is asking. */
@@ -90,25 +87,24 @@ export type YtAuthStatus = { state: 'checking' } | { state: 'unavailable' } | { 
 export function useYtAuth(): YtAuthStatus {
   const extension = useExtension();
   const present = extension.state === 'present' ? extension.extension : null;
-  const enabled = supportsAuth(present);
+  const hasExtAuth = supportsAuth(present);
   const query = useQuery({
     queryKey: ytAuthQueryKey,
     queryFn: () => readAuth(false),
-    enabled,
+    enabled: extension.state !== 'checking',
     staleTime: 30_000,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: hasExtAuth,
     retry: 1,
   });
 
   useEffect(() => {
-    if (!present || !enabled) return;
+    if (!present || !hasExtAuth) return;
     return present.bridge.subscribe((event) => {
-      if (event.event === 'yt.authState') adopt(event.data);
+      if (event.event === 'yt.authState') adoptYtAuth(event.data);
     });
-  }, [present, enabled]);
+  }, [present, hasExtAuth]);
 
-  if (extension.state === 'checking' || (enabled && query.isPending)) return { state: 'checking' };
-  if (!enabled) return { state: 'unavailable' };
+  if (extension.state === 'checking' || query.isPending) return { state: 'checking' };
   return { state: 'ready', auth: query.data ?? SIGNED_OUT };
 }
 
@@ -117,10 +113,10 @@ export function useSelectChannel() {
   return useMutation({
     mutationFn: async (channelId: string) => {
       const extension = detected();
-      if (!extension) throw new Error('The extension is not installed');
+      if (!extension || !supportsAuth(extension)) throw new Error('Channel switching requires the extension');
       return extension.bridge.call('yt.selectChannel', { channelId });
     },
-    onSuccess: adopt,
+    onSuccess: (s) => adoptYtAuth(s),
   });
 }
 
@@ -129,14 +125,19 @@ export function useRefreshYtAuth() {
   return useMutation({ mutationFn: () => readAuth(true) });
 }
 
-/** Connect or disconnect BitChord from the browser's YouTube session (it stays signed in to Google). */
+/** Connect or disconnect Unknwser from the user's YouTube session. */
 export function useSetConnected() {
   return useMutation({
     mutationFn: async (connected: boolean) => {
       const extension = detected();
-      if (!extension) throw new Error('The extension is not installed');
-      return extension.bridge.call('yt.setConnected', { connected });
+      if (extension && supportsAuth(extension)) {
+        return extension.bridge.call('yt.setConnected', { connected });
+      }
+      if (!connected) {
+        return signOutYtOAuth();
+      }
+      return toYtAuthState(loadStoredYtOAuth());
     },
-    onSuccess: adopt,
+    onSuccess: (s) => adoptYtAuth(s),
   });
 }
